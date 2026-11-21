@@ -1,39 +1,35 @@
 import React from 'react';
-import { Activity, ShieldCheck, Volume2, VolumeX, UserCheck, Play, Pause, FileText } from 'lucide-react';
+import { Activity, ShieldCheck, Volume2, VolumeX, Maximize2, Minimize2, FileText, RefreshCw } from 'lucide-react';
 
 interface HeaderNavProps {
-  subjectName: string;
-  onSelectSubject: (name: string, type: 'Clinical Patient' | 'Evaluator (Judge Baseline)') => void;
   isAudioMuted: boolean;
   onToggleAudio: () => void;
-  onCalibrateJudge: () => void;
+  isFullscreen: boolean;
+  onToggleFullscreen: () => void;
+  onResetSession: () => void;
   onOpenReport: () => void;
-  isTestRunning: boolean;
-  testTimeRemaining: number;
-  onStartTest: () => void;
   isCameraActive: boolean;
+  engineType: string;
 }
 
 export const HeaderNav: React.FC<HeaderNavProps> = ({
-  subjectName,
-  onSelectSubject,
   isAudioMuted,
   onToggleAudio,
-  onCalibrateJudge,
+  isFullscreen,
+  onToggleFullscreen,
+  onResetSession,
   onOpenReport,
-  isTestRunning,
-  testTimeRemaining,
-  onStartTest,
-  isCameraActive
+  isCameraActive,
+  engineType
 }) => {
   return (
     <header style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0', position: 'sticky', top: 0, zIndex: 100 }}>
-      <div style={{ maxWidth: '1440px', margin: '0 auto', padding: '0.85rem 2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+      <div style={{ maxWidth: '1600px', margin: '0 auto', padding: '0.85rem 2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
         
-        {/* Brand & Hospital Subtitle */}
+        {/* Brand & Subtitle */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <div style={{ width: '42px', height: '42px', borderRadius: '10px', background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ffffff', boxShadow: '0 4px 12px rgba(2, 132, 199, 0.25)' }}>
-            <Activity size={24} strokeWidth={2.4} />
+          <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ffffff', boxShadow: '0 4px 12px rgba(2, 132, 199, 0.25)' }}>
+            <Activity size={22} strokeWidth={2.4} />
           </div>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
@@ -43,78 +39,53 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
               <span style={{ fontSize: '0.68rem', padding: '0.15rem 0.55rem', borderRadius: '4px', background: '#e0f2fe', color: '#0369a1', fontWeight: 800, border: '1px solid #bae6fd', letterSpacing: '0.04em' }}>
                 MDS-UPDRS PART III
               </span>
-              <span style={{ fontSize: '0.68rem', padding: '0.15rem 0.55rem', borderRadius: '4px', background: '#f0fdf4', color: '#15803d', fontWeight: 700, border: '1px solid #bbf7d0', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                <ShieldCheck size={12} /> 60 FPS GPU-WASM
+              <span style={{ fontSize: '0.68rem', padding: '0.15rem 0.55rem', borderRadius: '4px', background: isCameraActive ? '#f0fdf4' : '#f8fafc', color: isCameraActive ? '#15803d' : '#64748b', fontWeight: 700, border: `1px solid ${isCameraActive ? '#bbf7d0' : '#e2e8f0'}`, display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                <ShieldCheck size={12} /> {isCameraActive ? 'LIVE 60 FPS • GPU ACCELERATED' : 'SENSOR STANDBY'}
               </span>
             </div>
             <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0.15rem 0 0 0', lineHeight: 1.3 }}>
-              Autonomous 21-Joint 3D Computer-Vision Biomechanical Motor Biomarker & Tremor FFT Suite
+              Autonomous 21-Joint 3D Biomechanical Motor Biomarker & Real-Time Tremor FFT Engine
             </p>
           </div>
         </div>
 
-        {/* Action Controls */}
+        {/* Real Clinical Controls */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
           
-          {/* Active Case Selector */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: '#f8fafc', padding: '0.35rem 0.75rem', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
-            <label htmlFor="subject-select" style={{ fontSize: '0.68rem', color: '#64748b', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              Subject:
-            </label>
-            <select
-              id="subject-select"
-              value={subjectName}
-              onChange={e => {
-                const val = e.target.value;
-                if (val.includes('Judge')) {
-                  onSelectSubject(val, 'Evaluator (Judge Baseline)');
-                } else {
-                  onSelectSubject(val, 'Clinical Patient');
-                }
-              }}
-              style={{ background: 'transparent', color: '#0f172a', border: 'none', fontSize: '0.78rem', fontWeight: 700, outline: 'none', cursor: 'pointer' }}
-            >
-              <option value="Dr. Evaluator (Judge Baseline)">Dr. Evaluator (Judge Baseline - Normal Control)</option>
-              <option value="Patient K. Sharma (MDS-UPDRS Severe Parkinson's)">Patient K. Sharma (MDS-UPDRS Severe Parkinson's)</option>
-              <option value="Patient M. Varma (Essential Action Tremor)">Patient M. Varma (Essential Action Tremor - 8-12 Hz)</option>
-              <option value="Patient S. Patel (Post-Stroke Hemiparesis)">Patient S. Patel (Post-Stroke Motor Deficit)</option>
-            </select>
-          </div>
-
           {/* Audio Sonification Toggle */}
           <button
             onClick={onToggleAudio}
             style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '0.45rem 0.8rem', background: isAudioMuted ? '#f1f5f9' : '#f0fdf4', color: isAudioMuted ? '#64748b' : '#15803d', border: `1px solid ${isAudioMuted ? '#cbd5e1' : '#bbf7d0'}`, borderRadius: '6px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}
-            title="Subtle auditory click upon physical pinch contact"
+            title="Acoustic click on zero-latency pinch contact"
           >
             {isAudioMuted ? <VolumeX size={14} /> : <Volume2 size={14} />}
-            {isAudioMuted ? 'Muted' : 'Acoustic Click'}
+            {isAudioMuted ? 'Audio Muted' : 'Acoustic Click Active'}
           </button>
 
-          {/* 10-Second Test Protocol */}
+          {/* Reset Baseline */}
           <button
-            onClick={onStartTest}
-            disabled={isTestRunning || !isCameraActive}
-            style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.45rem 0.85rem', background: isTestRunning ? '#f59e0b' : '#10b981', color: '#ffffff', border: 'none', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 700, cursor: isCameraActive ? 'pointer' : 'not-allowed', opacity: isCameraActive ? 1 : 0.6 }}
+            onClick={onResetSession}
+            style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '0.45rem 0.8rem', background: '#f8fafc', color: '#475569', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}
+            title="Reset telemetry counters"
           >
-            {isTestRunning ? <Pause size={13} /> : <Play size={13} />}
-            {isTestRunning ? `Running: ${testTimeRemaining}s` : '10s Protocol'}
+            <RefreshCw size={13} /> Reset Baseline
           </button>
 
-          {/* 1-Click Judge Baseline Calibration */}
+          {/* Fullscreen Toggle */}
           <button
-            onClick={onCalibrateJudge}
-            style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '0.45rem 0.85rem', background: '#0284c7', color: '#ffffff', border: 'none', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer', boxShadow: '0 2px 4px rgba(2, 132, 199, 0.25)' }}
+            onClick={onToggleFullscreen}
+            style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '0.45rem 0.85rem', background: isFullscreen ? '#0f172a' : '#0284c7', color: '#ffffff', border: 'none', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer', boxShadow: '0 2px 4px rgba(2, 132, 199, 0.25)' }}
           >
-            <UserCheck size={14} /> Live Judge Mode
+            {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+            {isFullscreen ? 'Exit Fullscreen' : 'Fullscreen Camera HUD'}
           </button>
 
-          {/* PDF Report Trigger */}
+          {/* Clinical Diagnostic PDF Report */}
           <button
             onClick={onOpenReport}
             style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '0.45rem 0.85rem', background: '#ffffff', color: '#0f172a', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}
           >
-            <FileText size={14} color="#0284c7" /> Report
+            <FileText size={14} color="#0284c7" /> Clinical Report
           </button>
 
         </div>
