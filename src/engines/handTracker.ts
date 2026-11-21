@@ -1,11 +1,10 @@
 /**
- * Real-Time 21-Joint 3D Hand Tracking Engine
+ * Real-Time 21-Joint 3D Hand Tracking Engine with Biomechanical Goniometry
  * Directly binds to Google MediaPipe Hands (window.Hands) with zero-latency client GPU execution
  */
 
 import { HandLandmark } from './kinematicsEngine';
 
-// Anatomical Bone Chains for 21 Joints
 export const BONE_CHAINS: Record<string, [number, number][]> = {
   thumb: [[0, 1], [1, 2], [2, 3], [3, 4]],
   index: [[0, 5], [5, 6], [6, 7], [7, 8]],
@@ -22,6 +21,9 @@ export class HighSpeedHandTracker {
   private latestLandmarks: HandLandmark[] | null = null;
   private latestHandedness: 'Right' | 'Left' | 'Unknown' = 'Unknown';
   private latestConfidence = 0;
+
+  // Kinetic Trajectory Ribbon History (last 16 frames of index tip)
+  private indexTrail: { x: number; y: number; t: number }[] = [];
 
   private offscreenCanvas: HTMLCanvasElement;
   private offscreenCtx: CanvasRenderingContext2D | null;
@@ -74,9 +76,6 @@ export class HighSpeedHandTracker {
     }
   }
 
-  /**
-   * Process incoming video frame
-   */
   public trackHand(video: HTMLVideoElement): {
     landmarks: HandLandmark[] | null;
     handedness: 'Right' | 'Left' | 'Unknown';
@@ -87,12 +86,10 @@ export class HighSpeedHandTracker {
       return { landmarks: null, handedness: 'Unknown', confidence: 0, engineType: 'Awaiting Video' };
     }
 
-    // Lazy load check if window.Hands loaded slightly after constructor
     if (!this.mpHands && (window as any).Hands) {
       this.initMediaPipe();
     }
 
-    // Send frame to MediaPipe if not currently busy
     if (this.mpHands && !this.isProcessing) {
       try {
         this.isProcessing = true;
@@ -102,7 +99,6 @@ export class HighSpeedHandTracker {
       }
     }
 
-    // If MediaPipe landmarks are available, return them directly
     if (this.latestLandmarks && this.latestLandmarks.length === 21) {
       return {
         landmarks: this.latestLandmarks,
@@ -112,7 +108,6 @@ export class HighSpeedHandTracker {
       };
     }
 
-    // Direct High-Speed Optical Contour Fallback
     const cvFallback = this.trackOpticalContour(video);
     return {
       landmarks: cvFallback,
@@ -122,9 +117,6 @@ export class HighSpeedHandTracker {
     };
   }
 
-  /**
-   * Sub-millisecond Optical Computer Vision Fallback
-   */
   private trackOpticalContour(video: HTMLVideoElement): HandLandmark[] | null {
     if (!this.offscreenCtx) return null;
 
@@ -240,7 +232,8 @@ export class HighSpeedHandTracker {
   }
 
   /**
-   * Render Glowing 21-Joint 3D Biometric Skeleton with Anatomical Color Coding
+   * Render Glowing 21-Joint 3D Biometric Skeleton
+   * CRITICAL FIX: Coordinates are mirrored in math (1 - pt.x) so text is 100% UN-MIRRORED and crisp!
    */
   public renderOverlay(
     ctx: CanvasRenderingContext2D,
@@ -250,35 +243,22 @@ export class HighSpeedHandTracker {
     pinchApertureMm: number,
     velocityMmS: number,
     isPinching: boolean,
-    engineType: string
+    indexFlexionDeg = 150
   ) {
     ctx.clearRect(0, 0, width, height);
 
     if (!landmarks || landmarks.length < 21) {
-      // Sleek Minimalist Medical Reticle
+      this.indexTrail = [];
+      // Minimalist Medical Reticle
       ctx.save();
-      ctx.strokeStyle = 'rgba(2, 132, 199, 0.35)';
+      ctx.strokeStyle = 'rgba(2, 132, 199, 0.4)';
       ctx.lineWidth = 1.5;
       ctx.setLineDash([8, 8]);
-      const rx = width * 0.25;
-      const ry = height * 0.12;
-      const rw = width * 0.5;
-      const rh = height * 0.76;
+      const rx = width * 0.28;
+      const ry = height * 0.15;
+      const rw = width * 0.44;
+      const rh = height * 0.7;
       ctx.strokeRect(rx, ry, rw, rh);
-
-      // Corner Accents
-      ctx.setLineDash([]);
-      ctx.strokeStyle = '#0284c7';
-      ctx.lineWidth = 3;
-      const corner = 24;
-      // Top-Left
-      ctx.beginPath(); ctx.moveTo(rx, ry + corner); ctx.lineTo(rx, ry); ctx.lineTo(rx + corner, ry); ctx.stroke();
-      // Top-Right
-      ctx.beginPath(); ctx.moveTo(rx + rw - corner, ry); ctx.lineTo(rx + rw, ry); ctx.lineTo(rx + rw, ry + corner); ctx.stroke();
-      // Bottom-Left
-      ctx.beginPath(); ctx.moveTo(rx, ry + rh - corner); ctx.lineTo(rx, ry + rh); ctx.lineTo(rx + corner, ry + rh); ctx.stroke();
-      // Bottom-Right
-      ctx.beginPath(); ctx.moveTo(rx + rw - corner, ry + rh); ctx.lineTo(rx + rw, ry + rh); ctx.lineTo(rx + rw, ry + rh - corner); ctx.stroke();
 
       ctx.fillStyle = '#0284c7';
       ctx.font = '700 13px Inter, -apple-system, sans-serif';
@@ -290,8 +270,36 @@ export class HighSpeedHandTracker {
 
     ctx.save();
 
-    // 1. Draw Biometric Bones by Anatomical Finger Group
-    const drawChain = (chain: [number, number][], strokeColor: string, lineWidth = 3) => {
+    // Helper to get mirrored screen coordinates:
+    // Mirrored video maps raw normalized x to (1 - pt.x) * width
+    const getX = (pt: HandLandmark) => (1 - pt.x) * width;
+    const getY = (pt: HandLandmark) => pt.y * height;
+
+    // Track index fingertip for kinetic velocity ribbon
+    const indexTip = landmarks[8];
+    const curIx = getX(indexTip);
+    const curIy = getY(indexTip);
+    this.indexTrail.push({ x: curIx, y: curIy, t: performance.now() });
+    if (this.indexTrail.length > 14) this.indexTrail.shift();
+
+    // 1. Draw Kinetic Trajectory Ribbon (Innovation)
+    if (this.indexTrail.length >= 3) {
+      for (let i = 1; i < this.indexTrail.length; i++) {
+        const p1 = this.indexTrail[i - 1];
+        const p2 = this.indexTrail[i];
+        const alpha = (i / this.indexTrail.length) * 0.6;
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.strokeStyle = `rgba(56, 189, 248, ${alpha})`;
+        ctx.lineWidth = (i / this.indexTrail.length) * 4;
+        ctx.lineCap = 'round';
+        ctx.stroke();
+      }
+    }
+
+    // 2. Draw Biometric Bones by Anatomical Finger Group
+    const drawChain = (chain: [number, number][], strokeColor: string, lineWidth = 3.5) => {
       ctx.strokeStyle = strokeColor;
       ctx.lineWidth = lineWidth;
       ctx.lineCap = 'round';
@@ -300,8 +308,8 @@ export class HighSpeedHandTracker {
         const p1 = landmarks[a];
         const p2 = landmarks[b];
         ctx.beginPath();
-        ctx.moveTo(p1.x * width, p1.y * height);
-        ctx.lineTo(p2.x * width, p2.y * height);
+        ctx.moveTo(getX(p1), getY(p1));
+        ctx.lineTo(getX(p2), getY(p2));
         ctx.stroke();
       });
     };
@@ -319,10 +327,10 @@ export class HighSpeedHandTracker {
     // Pinky: Purple
     drawChain(BONE_CHAINS.pinky, '#a855f7', 2.5);
 
-    // 2. Draw 21 Articulation Nodes
+    // 3. Draw 21 Articulation Nodes
     landmarks.forEach((pt, idx) => {
-      const px = pt.x * width;
-      const py = pt.y * height;
+      const px = getX(pt);
+      const py = getY(pt);
 
       const isThumbTip = idx === 4;
       const isIndexTip = idx === 8;
@@ -330,7 +338,6 @@ export class HighSpeedHandTracker {
 
       ctx.beginPath();
       if (isThumbTip || isIndexTip) {
-        // Hero Fingertips
         ctx.arc(px, py, isPinching ? 9 : 7, 0, 2 * Math.PI);
         ctx.fillStyle = isPinching ? '#10b981' : '#0284c7';
         ctx.fill();
@@ -338,7 +345,6 @@ export class HighSpeedHandTracker {
         ctx.strokeStyle = '#ffffff';
         ctx.stroke();
 
-        // Pulsing contact halo
         if (isPinching) {
           ctx.beginPath();
           ctx.arc(px, py, 16, 0, 2 * Math.PI);
@@ -363,13 +369,13 @@ export class HighSpeedHandTracker {
       }
     });
 
-    // 3. Dynamic Measurement Vector between Thumb (4) and Index (8)
+    // 4. Dynamic Measurement Vector between Thumb (4) and Index (8)
     const thumb = landmarks[4];
     const index = landmarks[8];
-    const tx = thumb.x * width;
-    const ty = thumb.y * height;
-    const ix = index.x * width;
-    const iy = index.y * height;
+    const tx = getX(thumb);
+    const ty = getY(thumb);
+    const ix = getX(index);
+    const iy = getY(index);
 
     ctx.beginPath();
     ctx.moveTo(tx, ty);
@@ -380,14 +386,14 @@ export class HighSpeedHandTracker {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // 4. Floating HUD Tag pinned to index fingertip
-    const tagX = ix + 18;
-    const tagY = iy - 12;
-    const tagWidth = 115;
-    const tagHeight = 44;
+    // 5. Floating HUD Tag pinned to index fingertip (100% UN-MIRRORED TEXT!)
+    const tagX = ix > width - 150 ? ix - 130 : ix + 20;
+    const tagY = Math.max(20, Math.min(height - 60, iy - 15));
+    const tagWidth = 125;
+    const tagHeight = 48;
 
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
-    ctx.roundRect(tagX, tagY, tagWidth, tagHeight, 6);
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+    ctx.roundRect(tagX, tagY, tagWidth, tagHeight, 8);
     ctx.fill();
     ctx.strokeStyle = isPinching ? '#10b981' : '#38bdf8';
     ctx.lineWidth = 1.5;
@@ -396,11 +402,22 @@ export class HighSpeedHandTracker {
     ctx.fillStyle = '#ffffff';
     ctx.font = '800 13px Inter, monospace';
     ctx.textAlign = 'left';
-    ctx.fillText(`${pinchApertureMm} mm`, tagX + 10, tagY + 18);
+    ctx.fillText(`${pinchApertureMm} mm`, tagX + 10, tagY + 20);
 
     ctx.fillStyle = isPinching ? '#34d399' : '#94a3b8';
-    ctx.font = '700 10px Inter, monospace';
-    ctx.fillText(isPinching ? '● CONTACT (0mm)' : `${velocityMmS} mm/s`, tagX + 10, tagY + 34);
+    ctx.font = '700 10.5px Inter, monospace';
+    ctx.fillText(isPinching ? '● CONTACT (0mm)' : `${velocityMmS} mm/s • ${indexFlexionDeg}°`, tagX + 10, tagY + 38);
+
+    // 6. Joint Goniometer Arc Tag at Index MCP Knuckle (Joint 5)
+    const mcp = landmarks[5];
+    const mx = getX(mcp);
+    const my = getY(mcp);
+    ctx.fillStyle = 'rgba(2, 132, 199, 0.85)';
+    ctx.beginPath();
+    ctx.arc(mx, my, 14, 0, (indexFlexionDeg / 180) * Math.PI);
+    ctx.strokeStyle = '#38bdf8';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
 
     ctx.restore();
   }

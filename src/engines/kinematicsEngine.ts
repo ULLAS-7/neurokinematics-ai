@@ -5,7 +5,7 @@
  * Standardized Clinical Protocols:
  * - MDS-UPDRS Task 3.4: Finger Tapping (Thumb to Index pinch kinematics, bradykinesia, amplitude decay)
  * - MDS-UPDRS Task 3.15: Postural Tremor of the Hands (Welch's FFT Power Spectral Density 0-16 Hz)
- * - MDS-UPDRS Task 3.6: Pronation-Supination (Dysdiadochokinesia angular velocity)
+ * - Real-Time Joint Goniometry (MCP & PIP Flexion Angles in Degrees)
  */
 
 export interface HandLandmark {
@@ -16,7 +16,7 @@ export interface HandLandmark {
 
 export interface TapEvent {
   timestamp: number;
-  aperture: number; // Distance in normalized units / mm
+  aperture: number;
   velocity: number;
   interTapIntervalMs: number;
   isFatigued: boolean;
@@ -37,6 +37,11 @@ export interface KinematicsTelemetry {
   handDetected: boolean;
   handConfidence: number; // 0-100%
   handedness: 'Right' | 'Left' | 'Unknown';
+
+  // Biomechanical Innovation: Joint Goniometry & Postural Stability
+  indexFlexionDeg: number; // Index MCP-PIP angle in degrees
+  thumbExtensionDeg: number; // Thumb CMC-MCP angle in degrees
+  posturalStabilityIndex: number; // 0-100% stability metric
   
   // Real-time Tremor FFT
   tremorFrequencyHz: number; // Dominant peak frequency in 0-16 Hz
@@ -44,7 +49,7 @@ export interface KinematicsTelemetry {
   tremorClassification: 'Healthy Baseline' | 'Parkinsonian Resting Tremor' | 'Essential Action Tremor' | 'Physiological Stress';
   spectrumBins: TremorSpectrumBin[];
 
-  // MDS-UPDRS Task 3.4 (Finger Tapping) Biomarkers
+  // MDS-UPDRS Task 3.4 Biomarkers
   totalTaps: number;
   meanCadenceHz: number;
   meanVelocityMmS: number;
@@ -75,7 +80,6 @@ export class KinematicsEngine {
   private freezingCount = 0;
   private lastMovementTime = Date.now();
 
-  // Calibration scale: normalized coordinate to millimeter conversion (approx. hand width ~85mm)
   private readonly MM_SCALE = 160; 
 
   public resetSession() {
@@ -107,7 +111,6 @@ export class KinematicsEngine {
 
     const thumbTip = landmarks[4];
     const indexTip = landmarks[8];
-    const wrist = landmarks[0];
 
     // 1. Calculate 3D Euclidean distance between Thumb Tip and Index Tip
     const dx = thumbTip.x - indexTip.x;
@@ -126,28 +129,30 @@ export class KinematicsEngine {
       }
     }
 
-    // Keep history
     this.apertureHistory.push({ t: now, aperture: apertureMm, velocity: velocityMmS });
     if (this.apertureHistory.length > this.historyCapacity) {
       this.apertureHistory.shift();
     }
 
-    // Track wrist/index motion for tremor FFT
     this.wristHistory.push({ t: now, x: indexTip.x, y: indexTip.y });
     if (this.wristHistory.length > 128) {
       this.wristHistory.shift();
     }
 
-    // 3. Pinch Event & Tap Kinematics Detection (Hysteresis thresholding)
+    // 3. Biomechanical Joint Goniometry (Angle Calculation)
+    // Index MCP angle: Joint 5 -> Joint 6 -> Joint 7
+    const indexFlexionDeg = this.calculateJointAngle(landmarks[5], landmarks[6], landmarks[7]);
+    // Thumb CMC-MCP angle: Joint 1 -> Joint 2 -> Joint 3
+    const thumbExtensionDeg = this.calculateJointAngle(landmarks[1], landmarks[2], landmarks[3]);
+
+    // 4. Pinch Event Detection
     const isPinching = apertureMm < 18;
 
     if (!this.wasPinching && isPinching) {
-      // Impact event: Contact made!
       const iti = this.lastTapTime > 0 ? now - this.lastTapTime : 300;
       this.lastTapTime = now;
       this.lastMovementTime = now;
 
-      // Track amplitude
       const tapAperture = this.lastPeakAperture > 0 ? this.lastPeakAperture : apertureMm;
       if (this.initialApertures.length < 3) {
         this.initialApertures.push(tapAperture);
@@ -166,7 +171,6 @@ export class KinematicsEngine {
       });
       this.lastPeakAperture = 0;
     } else if (!isPinching) {
-      // Opening stroke: Track max peak opening
       if (apertureMm > this.lastPeakAperture) {
         this.lastPeakAperture = apertureMm;
       }
@@ -177,16 +181,15 @@ export class KinematicsEngine {
 
     this.wasPinching = isPinching;
 
-    // Check for Motor Freezing / Hesitations (>1400ms pause with hand up)
     if (now - this.lastMovementTime > 1400 && this.taps.length >= 3) {
       this.freezingCount++;
       this.lastMovementTime = now;
     }
 
-    // 4. Calculate Welch's Fast Fourier Transform (FFT) Power Spectrum for Tremor
+    // 5. Calculate Welch's Fast Fourier Transform (FFT) Power Spectrum for Tremor
     const { peakFreq, peakPower, classification, bins } = this.computeTremorFFT();
 
-    // 5. Aggregate MDS-UPDRS Task 3.4 Summary Statistics
+    // 6. Aggregate MDS-UPDRS Task 3.4 Summary Statistics
     const totalTaps = this.taps.length;
     let meanCadenceHz = 0;
     let meanVelocityMmS = 0;
@@ -202,14 +205,12 @@ export class KinematicsEngine {
       const velocities = recentTaps.map(t => t.velocity);
       meanVelocityMmS = Math.round(velocities.reduce((a, b) => a + b, 0) / velocities.length);
 
-      // Coefficient of Variation CV = (Std / Mean) * 100
       if (intervals.length >= 3) {
         const variance = intervals.reduce((sum, v) => sum + Math.pow(v - meanIti, 2), 0) / intervals.length;
         const std = Math.sqrt(variance);
         rhythmRegularityCv = Math.round((std / meanIti) * 100);
       }
 
-      // Amplitude Decay: Compare initial taps vs recent taps
       if (this.initialApertures.length >= 2 && this.recentApertures.length >= 2) {
         const initMean = this.initialApertures.reduce((a, b) => a + b, 0) / this.initialApertures.length;
         const recMean = this.recentApertures.reduce((a, b) => a + b, 0) / this.recentApertures.length;
@@ -220,7 +221,10 @@ export class KinematicsEngine {
       }
     }
 
-    // 6. Clinical MDS-UPDRS Rating Evaluation
+    // Postural Stability Metric (100% when steady, drops when trembling)
+    const posturalStabilityIndex = Math.max(0, Math.min(100, Math.round(100 - (peakPower * 4.5))));
+
+    // 7. Clinical MDS-UPDRS Rating Evaluation
     const { grade, interpretation, alert } = this.evaluateUprdGrade(
       meanCadenceHz,
       amplitudeDecayPercent,
@@ -239,6 +243,9 @@ export class KinematicsEngine {
       handDetected: true,
       handConfidence: Math.round(confidence * 100),
       handedness,
+      indexFlexionDeg,
+      thumbExtensionDeg,
+      posturalStabilityIndex,
       tremorFrequencyHz: peakFreq,
       tremorPowerMm2: peakPower,
       tremorClassification: classification,
@@ -257,8 +264,26 @@ export class KinematicsEngine {
   }
 
   /**
-   * Real-time Fast Fourier Transform across 31 spectral frequency points
+   * Biomechanical Angle Calculation between 3 3D joints (A-B-C) in degrees
    */
+  private calculateJointAngle(a: HandLandmark, b: HandLandmark, c: HandLandmark): number {
+    const v1x = a.x - b.x;
+    const v1y = a.y - b.y;
+    const v1z = (a.z || 0) - (b.z || 0);
+
+    const v2x = c.x - b.x;
+    const v2y = c.y - b.y;
+    const v2z = (c.z || 0) - (b.z || 0);
+
+    const dot = v1x * v2x + v1y * v2y + v1z * v2z;
+    const mag1 = Math.sqrt(v1x * v1x + v1y * v1y + v1z * v1z);
+    const mag2 = Math.sqrt(v2x * v2x + v2y * v2y + v2z * v2z);
+
+    if (mag1 * mag2 === 0) return 180;
+    const cosAngle = Math.max(-1.0, Math.min(1.0, dot / (mag1 * mag2)));
+    return Math.round((Math.acos(cosAngle) * 180) / Math.PI);
+  }
+
   private computeTremorFFT(): {
     peakFreq: number;
     peakPower: number;
@@ -413,6 +438,9 @@ export class KinematicsEngine {
       handDetected: false,
       handConfidence: 0,
       handedness: 'Unknown',
+      indexFlexionDeg: 180,
+      thumbExtensionDeg: 180,
+      posturalStabilityIndex: 100,
       tremorFrequencyHz: 0,
       tremorPowerMm2: 0,
       tremorClassification: 'Healthy Baseline',

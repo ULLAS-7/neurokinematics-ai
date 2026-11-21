@@ -47,7 +47,6 @@ export const App: React.FC = () => {
   const frameCountRef = useRef<number>(0);
   const lastFpsTimeRef = useRef<number>(performance.now());
 
-  // Initialize hand tracker once
   useEffect(() => {
     handTrackerRef.current = new HighSpeedHandTracker();
   }, []);
@@ -87,7 +86,6 @@ export const App: React.FC = () => {
     kinematicsEngineRef.current.resetSession();
   };
 
-  // Start Real-Time Webcam Stream
   const startCamera = async () => {
     try {
       setCameraError(null);
@@ -119,7 +117,6 @@ export const App: React.FC = () => {
     }
   };
 
-  // Stop Webcam Stream
   const stopCamera = () => {
     if (animFrameIdRef.current) {
       cancelAnimationFrame(animFrameIdRef.current);
@@ -147,7 +144,6 @@ export const App: React.FC = () => {
       const tracker = handTrackerRef.current;
       const engine = kinematicsEngineRef.current;
 
-      // Calculate Real Live FPS
       frameCountRef.current++;
       const now = performance.now();
       if (now - lastFpsTimeRef.current >= 1000) {
@@ -158,6 +154,7 @@ export const App: React.FC = () => {
       }
 
       if (video && overlayCanvas && tracker && video.readyState >= 2) {
+        // Match canvas dimensions to the exact rendered video dimensions
         const width = video.videoWidth || 1280;
         const height = video.videoHeight || 720;
 
@@ -172,7 +169,7 @@ export const App: React.FC = () => {
         const trackResult = tracker.trackHand(video);
         setEngineType(trackResult.engineType);
 
-        // 2. Process Real Kinematics
+        // 2. Process Real Kinematics with Biomechanical Goniometry
         const telemetryResult = engine.processLandmarks(
           trackResult.landmarks,
           trackResult.handedness,
@@ -192,7 +189,7 @@ export const App: React.FC = () => {
           }));
         }
 
-        // 4. Zero-Latency Acoustic Sonification on Pinch Impact
+        // 4. Acoustic Sonification on Pinch Impact
         if (!wasPreviouslyPinching && telemetryResult.isPinching) {
           audioSonifier.playPinchClick();
         }
@@ -201,7 +198,7 @@ export const App: React.FC = () => {
         }
         wasPreviouslyPinching = telemetryResult.isPinching;
 
-        // 5. Render Glowing 3D Biometric Skeleton
+        // 5. Render Glowing 3D Biometric Skeleton (WITHOUT MIRRORED TEXT!)
         if (overlayCtx) {
           tracker.renderOverlay(
             overlayCtx,
@@ -211,7 +208,7 @@ export const App: React.FC = () => {
             telemetryResult.pinchApertureMm,
             telemetryResult.instantVelocityMmS,
             telemetryResult.isPinching,
-            trackResult.engineType
+            telemetryResult.indexFlexionDeg
           );
         }
 
@@ -250,13 +247,13 @@ export const App: React.FC = () => {
     for (let x = 0; x < w; x += 25) {
       ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
     }
-    for (let y = 0; y < h; y += 20) {
+    for (let y = 0; y < h; y += 18) {
       ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
     }
 
     const history = telemetry.apertureHistory;
     if (history.length < 2) {
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
       ctx.font = '600 11px Inter, sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText('Move hand in front of camera to generate live aperture curve', w / 2, h / 2);
@@ -279,7 +276,7 @@ export const App: React.FC = () => {
 
     history.forEach((pt, idx) => {
       const x = (idx / (history.length - 1)) * w;
-      const y = h - Math.min(1.0, pt.aperture / maxApertureDisplay) * (h - 10) - 5;
+      const y = h - Math.min(1.0, pt.aperture / maxApertureDisplay) * (h - 8) - 4;
       if (idx === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     });
@@ -287,7 +284,7 @@ export const App: React.FC = () => {
 
     const latest = history[history.length - 1];
     const curX = w - 4;
-    const curY = h - Math.min(1.0, latest.aperture / maxApertureDisplay) * (h - 10) - 5;
+    const curY = h - Math.min(1.0, latest.aperture / maxApertureDisplay) * (h - 8) - 4;
     ctx.fillStyle = '#38bdf8';
     ctx.beginPath();
     ctx.arc(curX, curY, 4, 0, 2 * Math.PI);
@@ -301,7 +298,8 @@ export const App: React.FC = () => {
     <div
       ref={mainContainerRef}
       style={{
-        minHeight: '100vh',
+        height: '100vh',
+        maxHeight: '100vh',
         display: 'flex',
         flexDirection: 'column',
         background: '#090d16',
@@ -324,70 +322,70 @@ export const App: React.FC = () => {
         engineType={engineType}
       />
 
-      {/* FULLSCREEN HERO CAMERA STAGE */}
-      <div style={{ flex: 1, position: 'relative', width: '100%', height: 'calc(100vh - 75px)', overflow: 'hidden', background: '#020617' }}>
+      {/* FULLSCREEN HERO CAMERA VIEWPORT (Strictly Fitted to Viewport - Zero Overflow) */}
+      <div style={{ flex: 1, minHeight: 0, position: 'relative', width: '100%', height: 'calc(100vh - 65px)', overflow: 'hidden', background: '#020617', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         
-        {/* Actual Video Tag (Mirrored for Natural Kinesthetic Interaction) */}
+        {/* Mirrored Video Feed with Clean Object-Fit Contain */}
         <video
           ref={videoRef}
           playsInline
           muted
-          style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }}
+          style={{ width: '100%', height: '100%', objectFit: 'contain', transform: 'scaleX(-1)' }}
         />
 
-        {/* 60 FPS 21-Joint Biometric Skeleton Overlay Canvas */}
+        {/* 60 FPS 21-Joint Biometric Skeleton Overlay Canvas (NO CSS SCALEX(-1), COORDINATES ARE MIRRORED IN MATH!) */}
         <canvas
           ref={overlayCanvasRef}
-          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', transform: 'scaleX(-1)' }}
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', objectFit: 'contain' }}
         />
 
-        {/* IDLE HERO STATE (When Camera is Not Yet Active) */}
+        {/* IDLE HERO STATE (Before Camera Enables) */}
         {!isCameraActive && (
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'radial-gradient(circle at center, rgba(15, 23, 42, 0.85) 0%, rgba(2, 6, 23, 0.98) 100%)', color: '#ffffff', padding: '2rem', textAlign: 'center', zIndex: 10 }}>
-            <div style={{ width: '68px', height: '68px', borderRadius: '50%', background: 'rgba(2, 132, 199, 0.15)', border: '2px solid #0284c7', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '1.25rem', color: '#38bdf8', boxShadow: '0 0 30px rgba(2, 132, 199, 0.4)' }}>
-              <Camera size={32} />
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'radial-gradient(circle at center, rgba(15, 23, 42, 0.88) 0%, rgba(2, 6, 23, 0.98) 100%)', color: '#ffffff', padding: '1.5rem', textAlign: 'center', zIndex: 10 }}>
+            <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: 'rgba(2, 132, 199, 0.15)', border: '2px solid #0284c7', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '1rem', color: '#38bdf8', boxShadow: '0 0 30px rgba(2, 132, 199, 0.4)' }}>
+              <Camera size={30} />
             </div>
-            <h2 style={{ fontSize: '1.65rem', fontWeight: 900, margin: '0 0 0.5rem 0', letterSpacing: '-0.02em' }}>
+            <h2 style={{ fontSize: '1.5rem', fontWeight: 900, margin: '0 0 0.4rem 0', letterSpacing: '-0.02em' }}>
               Autonomous 3D Motor Kinematics Scanner
             </h2>
-            <p style={{ fontSize: '0.9rem', color: '#94a3b8', maxWidth: '520px', margin: '0 0 1.75rem 0', lineHeight: 1.5 }}>
-              Launch your webcam to track all 21 hand joints at 60 FPS with client-side GPU acceleration. Measures real physical tapping frequency, amplitude fatigue, and live Welch's FFT tremor spectra with zero cloud latency.
+            <p style={{ fontSize: '0.85rem', color: '#94a3b8', maxWidth: '480px', margin: '0 0 1.5rem 0', lineHeight: 1.45 }}>
+              Launch your webcam to track all 21 hand joints at 60 FPS. Computes real-time tapping cadence, amplitude fatigue, joint goniometry angles, and Welch's FFT tremor spectra.
             </p>
-            <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
               <button
                 onClick={startCamera}
-                style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.75rem 1.75rem', background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)', color: '#ffffff', border: 'none', borderRadius: '8px', fontSize: '0.9rem', fontWeight: 800, cursor: 'pointer', boxShadow: '0 4px 20px rgba(2, 132, 199, 0.5)' }}
+                style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.65rem 1.5rem', background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)', color: '#ffffff', border: 'none', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 800, cursor: 'pointer', boxShadow: '0 4px 20px rgba(2, 132, 199, 0.5)' }}
               >
-                <Camera size={18} /> Enable Fullscreen Camera
+                <Camera size={16} /> Enable Fullscreen Camera
               </button>
             </div>
           </div>
         )}
 
-        {/* Camera Permission / Device Error Banner */}
+        {/* Camera Permission Error Banner */}
         {cameraError && (
-          <div style={{ position: 'absolute', top: '1.5rem', left: '50%', transform: 'translateX(-50%)', background: 'rgba(220, 38, 38, 0.95)', color: '#ffffff', padding: '0.85rem 1.5rem', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 700, zIndex: 50, boxShadow: '0 4px 20px rgba(0,0,0,0.5)' }}>
+          <div style={{ position: 'absolute', top: '1rem', left: '50%', transform: 'translateX(-50%)', background: 'rgba(220, 38, 38, 0.95)', color: '#ffffff', padding: '0.75rem 1.25rem', borderRadius: '8px', fontSize: '0.8rem', fontWeight: 700, zIndex: 50, boxShadow: '0 4px 20px rgba(0,0,0,0.5)' }}>
             ⚠️ {cameraError}
           </div>
         )}
 
         {/* =========================================================================
-            FLOATING GLASS CLINICAL HUD PANELS (Overlaid on Camera Viewport)
+            RESPONSIVE FLOATING CLINICAL HUD PANELS (Fitted Cleanly in Viewport)
             ========================================================================= */}
         {isCameraActive && (
           <>
-            {/* 1. TOP-LEFT HUD: LIVE RAW COORDINATE TELEMETRY STREAM (PROVES REAL-TIME DATA) */}
-            <div style={{ position: 'absolute', top: '1.25rem', left: '1.25rem', background: 'rgba(15, 23, 42, 0.82)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: '10px', padding: '1rem 1.25rem', width: '280px', pointerEvents: 'none', boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem', borderBottom: '1px solid rgba(255, 255, 255, 0.1)', paddingBottom: '0.4rem' }}>
-                <span style={{ fontSize: '0.7rem', fontWeight: 800, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  Live 3D Coordinate Stream
+            {/* 1. TOP-LEFT HUD: LIVE RAW 3D COORDINATE TELEMETRY STREAM */}
+            <div style={{ position: 'absolute', top: '0.75rem', left: '0.75rem', background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: '8px', padding: '0.75rem 1rem', width: '260px', pointerEvents: 'none', zIndex: 20, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem', borderBottom: '1px solid rgba(255, 255, 255, 0.1)', paddingBottom: '0.3rem' }}>
+                <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Live 3D Telemetry
                 </span>
-                <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#10b981', fontFamily: 'monospace' }}>
+                <span style={{ fontSize: '0.65rem', fontWeight: 800, color: '#10b981', fontFamily: 'monospace' }}>
                   ● {rawCoordinates.fps} FPS • &lt;16ms
                 </span>
               </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.72rem', fontFamily: 'JetBrains Mono, monospace', color: '#cbd5e1' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.68rem', fontFamily: 'JetBrains Mono, monospace', color: '#cbd5e1' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ color: '#10b981', fontWeight: 700 }}>Thumb(J4):</span>
                   <span>{rawCoordinates.thumbTip.x.toFixed(3)}, {rawCoordinates.thumbTip.y.toFixed(3)}</span>
@@ -400,91 +398,91 @@ export const App: React.FC = () => {
                   <span style={{ color: '#94a3b8' }}>Wrist(J0):</span>
                   <span>{rawCoordinates.wrist.x.toFixed(3)}, {rawCoordinates.wrist.y.toFixed(3)}</span>
                 </div>
-                <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '0.35rem', marginTop: '0.2rem', display: 'flex', justifyContent: 'space-between', fontWeight: 800, color: telemetry?.isPinching ? '#10b981' : '#ffffff' }}>
-                  <span>Distance:</span>
+                <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '0.25rem', marginTop: '0.15rem', display: 'flex', justifyContent: 'space-between', fontWeight: 800, color: telemetry?.isPinching ? '#10b981' : '#ffffff' }}>
+                  <span>Aperture:</span>
                   <span>{telemetry ? `${telemetry.pinchApertureMm} mm` : '0 mm'}</span>
                 </div>
               </div>
             </div>
 
-            {/* 2. TOP-RIGHT HUD: QUANTITATIVE MDS-UPDRS SCOREBOARD */}
-            <div style={{ position: 'absolute', top: '1.25rem', right: '1.25rem', background: 'rgba(15, 23, 42, 0.82)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: '10px', padding: '1rem 1.25rem', width: '310px', pointerEvents: 'none', boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
+            {/* 2. TOP-RIGHT HUD: QUANTITATIVE MDS-UPDRS SCOREBOARD & JOINT GONIOMETRY */}
+            <div style={{ position: 'absolute', top: '0.75rem', right: '0.75rem', background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: '8px', padding: '0.75rem 1rem', width: '280px', pointerEvents: 'none', zIndex: 20, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
               
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                <span style={{ fontSize: '0.7rem', fontWeight: 800, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
+                <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                   MDS-UPDRS Motor Rating
                 </span>
-                <span style={{ fontSize: '0.75rem', fontWeight: 900, padding: '0.15rem 0.55rem', borderRadius: '4px', background: !telemetry || telemetry.updrsGrade === 0 ? 'rgba(16, 185, 129, 0.2)' : telemetry.updrsGrade <= 2 ? 'rgba(245, 158, 11, 0.2)' : 'rgba(239, 68, 68, 0.25)', color: !telemetry || telemetry.updrsGrade === 0 ? '#34d399' : telemetry.updrsGrade <= 2 ? '#fbbf24' : '#f87171', border: '1px solid currentColor' }}>
+                <span style={{ fontSize: '0.7rem', fontWeight: 900, padding: '0.12rem 0.5rem', borderRadius: '4px', background: !telemetry || telemetry.updrsGrade === 0 ? 'rgba(16, 185, 129, 0.2)' : telemetry.updrsGrade <= 2 ? 'rgba(245, 158, 11, 0.2)' : 'rgba(239, 68, 68, 0.25)', color: !telemetry || telemetry.updrsGrade === 0 ? '#34d399' : telemetry.updrsGrade <= 2 ? '#fbbf24' : '#f87171', border: '1px solid currentColor' }}>
                   GRADE {telemetry ? telemetry.updrsGrade : 0} / 4
                 </span>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.5rem', marginTop: '0.65rem' }}>
-                <div style={{ background: 'rgba(255, 255, 255, 0.05)', borderRadius: '6px', padding: '0.5rem 0.65rem' }}>
-                  <span style={{ fontSize: '0.65rem', color: '#94a3b8', textTransform: 'uppercase' }}>Cadence</span>
-                  <p style={{ margin: '0.1rem 0 0 0', fontSize: '1.15rem', fontWeight: 900, color: '#ffffff', fontFamily: 'monospace' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.4rem', marginTop: '0.4rem' }}>
+                <div style={{ background: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px', padding: '0.4rem 0.5rem' }}>
+                  <span style={{ fontSize: '0.62rem', color: '#94a3b8', textTransform: 'uppercase' }}>Cadence</span>
+                  <p style={{ margin: 0, fontSize: '1rem', fontWeight: 900, color: '#ffffff', fontFamily: 'monospace' }}>
                     {telemetry ? `${telemetry.meanCadenceHz} Hz` : '0 Hz'}
                   </p>
                 </div>
 
-                <div style={{ background: 'rgba(255, 255, 255, 0.05)', borderRadius: '6px', padding: '0.5rem 0.65rem' }}>
-                  <span style={{ fontSize: '0.65rem', color: '#94a3b8', textTransform: 'uppercase' }}>Amplitude Decay</span>
-                  <p style={{ margin: '0.1rem 0 0 0', fontSize: '1.15rem', fontWeight: 900, color: telemetry && telemetry.amplitudeDecayPercent > 30 ? '#f87171' : '#ffffff', fontFamily: 'monospace' }}>
+                <div style={{ background: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px', padding: '0.4rem 0.5rem' }}>
+                  <span style={{ fontSize: '0.62rem', color: '#94a3b8', textTransform: 'uppercase' }}>Amplitude Decay</span>
+                  <p style={{ margin: 0, fontSize: '1rem', fontWeight: 900, color: telemetry && telemetry.amplitudeDecayPercent > 30 ? '#f87171' : '#ffffff', fontFamily: 'monospace' }}>
                     {telemetry ? `${telemetry.amplitudeDecayPercent}%` : '0%'}
                   </p>
                 </div>
 
-                <div style={{ background: 'rgba(255, 255, 255, 0.05)', borderRadius: '6px', padding: '0.5rem 0.65rem' }}>
-                  <span style={{ fontSize: '0.65rem', color: '#94a3b8', textTransform: 'uppercase' }}>Total Taps</span>
-                  <p style={{ margin: '0.1rem 0 0 0', fontSize: '1.15rem', fontWeight: 900, color: '#38bdf8', fontFamily: 'monospace' }}>
-                    {telemetry ? telemetry.totalTaps : 0}
+                <div style={{ background: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px', padding: '0.4rem 0.5rem' }}>
+                  <span style={{ fontSize: '0.62rem', color: '#94a3b8', textTransform: 'uppercase' }}>Index Flexion</span>
+                  <p style={{ margin: 0, fontSize: '1rem', fontWeight: 900, color: '#38bdf8', fontFamily: 'monospace' }}>
+                    {telemetry ? `${telemetry.indexFlexionDeg}°` : '180°'}
                   </p>
                 </div>
 
-                <div style={{ background: 'rgba(255, 255, 255, 0.05)', borderRadius: '6px', padding: '0.5rem 0.65rem' }}>
-                  <span style={{ fontSize: '0.65rem', color: '#94a3b8', textTransform: 'uppercase' }}>Tremor Peak</span>
-                  <p style={{ margin: '0.1rem 0 0 0', fontSize: '1.15rem', fontWeight: 900, color: telemetry && telemetry.tremorFrequencyHz > 0 ? '#f87171' : '#34d399', fontFamily: 'monospace' }}>
+                <div style={{ background: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px', padding: '0.4rem 0.5rem' }}>
+                  <span style={{ fontSize: '0.62rem', color: '#94a3b8', textTransform: 'uppercase' }}>Tremor Peak</span>
+                  <p style={{ margin: 0, fontSize: '1rem', fontWeight: 900, color: telemetry && telemetry.tremorFrequencyHz > 0 ? '#f87171' : '#34d399', fontFamily: 'monospace' }}>
                     {telemetry && telemetry.tremorFrequencyHz > 0 ? `${telemetry.tremorFrequencyHz} Hz` : '0 Hz'}
                   </p>
                 </div>
               </div>
 
-              <p style={{ fontSize: '0.7rem', color: '#94a3b8', margin: '0.65rem 0 0 0', lineHeight: 1.3 }}>
-                {telemetry?.updrsInterpretation || 'Tap index and thumb together to measure tapping cadence and fatigue.'}
-              </p>
+              <div style={{ marginTop: '0.4rem', borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '0.3rem', display: 'flex', justifyContent: 'space-between', fontSize: '0.65rem', color: '#94a3b8' }}>
+                <span>Stability Index:</span>
+                <span style={{ fontWeight: 800, color: '#34d399' }}>{telemetry ? `${telemetry.posturalStabilityIndex}%` : '100%'}</span>
+              </div>
             </div>
 
             {/* 3. BOTTOM-LEFT HUD: 60 FPS KINETIC OSCILLOSCOPE d(t) */}
-            <div style={{ position: 'absolute', bottom: '1.25rem', left: '1.25rem', background: 'rgba(15, 23, 42, 0.82)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: '10px', padding: '0.85rem 1rem', width: '360px', pointerEvents: 'none', boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
-                <span style={{ fontSize: '0.7rem', fontWeight: 800, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            <div style={{ position: 'absolute', bottom: '0.75rem', left: '0.75rem', background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: '8px', padding: '0.65rem 0.85rem', width: '300px', pointerEvents: 'none', zIndex: 20, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.3rem' }}>
+                <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                   Pinch Aperture Waveform d(t)
                 </span>
-                <span style={{ fontSize: '0.68rem', color: '#94a3b8', fontFamily: 'monospace' }}>
-                  Threshold: 16mm Contact
+                <span style={{ fontSize: '0.65rem', color: '#94a3b8', fontFamily: 'monospace' }}>
+                  {telemetry ? `${telemetry.totalTaps} Taps` : '0 Taps'}
                 </span>
               </div>
               <canvas
                 ref={oscilloscopeRef}
-                width={340}
-                height={75}
-                style={{ width: '100%', height: '75px', borderRadius: '4px' }}
+                width={280}
+                height={60}
+                style={{ width: '100%', height: '60px', borderRadius: '4px' }}
               />
             </div>
 
             {/* 4. BOTTOM-RIGHT HUD: REAL-TIME WELCH'S FFT TREMOR POWER SPECTRUM */}
-            <div style={{ position: 'absolute', bottom: '1.25rem', right: '1.25rem', background: 'rgba(15, 23, 42, 0.82)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: '10px', padding: '0.85rem 1rem', width: '360px', pointerEvents: 'none', boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
-                <span style={{ fontSize: '0.7rem', fontWeight: 800, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  Live Tremor FFT Spectrum (0–16 Hz)
+            <div style={{ position: 'absolute', bottom: '0.75rem', right: '0.75rem', background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: '8px', padding: '0.65rem 0.85rem', width: '300px', pointerEvents: 'none', zIndex: 20, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.3rem' }}>
+                <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Tremor FFT Spectrum (0–16 Hz)
                 </span>
-                <span style={{ fontSize: '0.68rem', fontWeight: 800, color: telemetry && telemetry.tremorClassification === 'Parkinsonian Resting Tremor' ? '#f87171' : '#34d399' }}>
+                <span style={{ fontSize: '0.65rem', fontWeight: 800, color: telemetry && telemetry.tremorClassification === 'Parkinsonian Resting Tremor' ? '#f87171' : '#34d399' }}>
                   {telemetry ? telemetry.tremorClassification : 'Baseline'}
                 </span>
               </div>
 
-              {/* Live Spectrum Bars */}
-              <div style={{ height: '70px', display: 'flex', alignItems: 'flex-end', gap: '2px', background: 'rgba(0,0,0,0.25)', padding: '0.35rem 0.2rem', borderRadius: '4px', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+              <div style={{ height: '55px', display: 'flex', alignItems: 'flex-end', gap: '2px', background: 'rgba(0,0,0,0.25)', padding: '0.25rem 0.15rem', borderRadius: '4px', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
                 {telemetry && telemetry.spectrumBins.map((bin, i) => {
                   const isParkinsonBand = bin.frequency >= 4.0 && bin.frequency <= 6.5;
                   const isEssentialBand = bin.frequency >= 7.5 && bin.frequency <= 12.0;
@@ -492,8 +490,8 @@ export const App: React.FC = () => {
 
                   let barColor = 'rgba(255, 255, 255, 0.3)';
                   if (bin.isPeak) barColor = '#ef4444';
-                  else if (isParkinsonBand) barColor = 'rgba(248, 113, 113, 0.7)';
-                  else if (isEssentialBand) barColor = 'rgba(192, 132, 252, 0.7)';
+                  else if (isParkinsonBand) barColor = 'rgba(248, 113, 113, 0.75)';
+                  else if (isEssentialBand) barColor = 'rgba(192, 132, 252, 0.75)';
 
                   return (
                     <div
@@ -504,25 +502,25 @@ export const App: React.FC = () => {
                 })}
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.25rem', fontSize: '0.62rem', color: '#64748b', fontFamily: 'monospace' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.2rem', fontSize: '0.6rem', color: '#64748b', fontFamily: 'monospace' }}>
                 <span>0 Hz</span>
-                <span style={{ color: '#f87171' }}>4-6 Hz (Parkinson)</span>
-                <span style={{ color: '#c084fc' }}>8-12 Hz (Essential)</span>
+                <span style={{ color: '#f87171' }}>4-6 Hz (PD)</span>
+                <span style={{ color: '#c084fc' }}>8-12 Hz (ET)</span>
                 <span>16 Hz</span>
               </div>
             </div>
 
             {/* 5. BOTTOM-CENTER HUD: INSTANTANEOUS CLINICAL ALERT BANNER */}
-            <div style={{ position: 'absolute', bottom: '1.25rem', left: '50%', transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', gap: '0.6rem', background: telemetry?.clinicalAlert ? 'rgba(220, 38, 38, 0.95)' : 'rgba(15, 23, 42, 0.88)', backdropFilter: 'blur(8px)', border: `1px solid ${telemetry?.clinicalAlert ? '#fca5a5' : 'rgba(255, 255, 255, 0.15)'}`, padding: '0.5rem 1.25rem', borderRadius: '30px', color: '#ffffff', fontSize: '0.78rem', fontWeight: 800, pointerEvents: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.4)', transition: 'all 0.2s ease' }}>
+            <div style={{ position: 'absolute', bottom: '0.75rem', left: '50%', transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', gap: '0.5rem', background: telemetry?.clinicalAlert ? 'rgba(220, 38, 38, 0.95)' : 'rgba(15, 23, 42, 0.88)', backdropFilter: 'blur(8px)', border: `1px solid ${telemetry?.clinicalAlert ? '#fca5a5' : 'rgba(255, 255, 255, 0.15)'}`, padding: '0.45rem 1.15rem', borderRadius: '30px', color: '#ffffff', fontSize: '0.75rem', fontWeight: 800, pointerEvents: 'none', zIndex: 20, boxShadow: '0 4px 20px rgba(0,0,0,0.4)' }}>
               <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: telemetry?.clinicalAlert ? '#ffffff' : telemetry?.isPinching ? '#10b981' : '#38bdf8' }}></span>
-              {telemetry?.clinicalAlert || (telemetry?.isPinching ? 'FINGER PINCH CONTACT DETECTED' : 'PHYSICAL MOTOR TRACKING ACTIVE')}
+              {telemetry?.clinicalAlert || (telemetry?.isPinching ? 'FINGER PINCH CONTACT DETECTED' : 'BIOMECHANICAL MOTOR TELEMETRY ACTIVE')}
             </div>
 
-            {/* Quick Stop Vision Floating Button (Top Center) */}
-            <div style={{ position: 'absolute', top: '1.25rem', left: '50%', transform: 'translateX(-50%)', zIndex: 30 }}>
+            {/* Stop Vision Floating Button (Top Center) */}
+            <div style={{ position: 'absolute', top: '0.75rem', left: '50%', transform: 'translateX(-50%)', zIndex: 30 }}>
               <button
                 onClick={stopCamera}
-                style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '0.4rem 0.9rem', background: 'rgba(220, 38, 38, 0.85)', backdropFilter: 'blur(4px)', color: '#ffffff', border: '1px solid rgba(255, 255, 255, 0.2)', borderRadius: '20px', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.15s ease' }}
+                style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '0.35rem 0.85rem', background: 'rgba(220, 38, 38, 0.85)', backdropFilter: 'blur(4px)', color: '#ffffff', border: '1px solid rgba(255, 255, 255, 0.2)', borderRadius: '20px', fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.15s ease' }}
               >
                 <VideoOff size={13} /> Stop Vision Stream
               </button>
