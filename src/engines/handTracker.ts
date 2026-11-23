@@ -1,9 +1,9 @@
 /**
  * Real-Time 21-Joint 3D Hand Tracking Engine with Biomechanical Goniometry
- * Directly binds to Google MediaPipe Hands (window.Hands) with zero-latency client GPU execution
+ * & Kinetic Target Reaching Protocol (MDS-UPDRS Task 3.12 Dysmetria)
  */
 
-import { HandLandmark } from './kinematicsEngine';
+import { HandLandmark, TargetReachingState } from './kinematicsEngine';
 
 export const BONE_CHAINS: Record<string, [number, number][]> = {
   thumb: [[0, 1], [1, 2], [2, 3], [3, 4]],
@@ -233,7 +233,8 @@ export class HighSpeedHandTracker {
 
   /**
    * Render Glowing 21-Joint 3D Biometric Skeleton
-   * CRITICAL FIX: Coordinates are mirrored in math (1 - pt.x) so text is 100% UN-MIRRORED and crisp!
+   * Coordinates mathematically mirrored: (1 - pt.x) * width
+   * Text is 100% UN-MIRRORED, normal, and crisp!
    */
   public renderOverlay(
     ctx: CanvasRenderingContext2D,
@@ -243,13 +244,61 @@ export class HighSpeedHandTracker {
     pinchApertureMm: number,
     velocityMmS: number,
     isPinching: boolean,
-    indexFlexionDeg = 150
+    indexFlexionDeg = 150,
+    targetState?: TargetReachingState,
+    isTargetMode = false
   ) {
     ctx.clearRect(0, 0, width, height);
 
+    const getX = (pt: HandLandmark) => (1 - pt.x) * width;
+    const getY = (pt: HandLandmark) => pt.y * height;
+
+    // 0. Render Task 3.12 Kinetic Target Reticle (if Target Reaching Mode is Active)
+    if (isTargetMode && targetState) {
+      const tgX = targetState.targetX * width;
+      const tgY = targetState.targetY * height;
+
+      ctx.save();
+      // Pulsing outer halo
+      ctx.beginPath();
+      ctx.arc(tgX, tgY, targetState.isTargetLocked ? 36 : 28, 0, 2 * Math.PI);
+      ctx.strokeStyle = targetState.isTargetLocked ? 'rgba(16, 185, 129, 0.8)' : 'rgba(56, 189, 248, 0.6)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Inner Target Bullseye
+      ctx.beginPath();
+      ctx.arc(tgX, tgY, 14, 0, 2 * Math.PI);
+      ctx.fillStyle = targetState.isTargetLocked ? 'rgba(16, 185, 129, 0.4)' : 'rgba(2, 132, 199, 0.3)';
+      ctx.fill();
+      ctx.strokeStyle = targetState.isTargetLocked ? '#10b981' : '#38bdf8';
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+
+      // Crosshairs
+      ctx.beginPath();
+      ctx.moveTo(tgX - 22, tgY); ctx.lineTo(tgX + 22, tgY);
+      ctx.moveTo(tgX, tgY - 22); ctx.lineTo(tgX, tgY + 22);
+      ctx.strokeStyle = targetState.isTargetLocked ? '#10b981' : '#38bdf8';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Target Label
+      ctx.fillStyle = targetState.isTargetLocked ? '#34d399' : '#38bdf8';
+      ctx.font = '800 11px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(
+        targetState.isTargetLocked ? '🎯 TARGET LOCKED' : `TARGET (${targetState.distanceToTargetMm} mm)`,
+        tgX,
+        tgY - 32
+      );
+      ctx.restore();
+    }
+
     if (!landmarks || landmarks.length < 21) {
       this.indexTrail = [];
-      // Minimalist Medical Reticle
       ctx.save();
       ctx.strokeStyle = 'rgba(2, 132, 199, 0.4)';
       ctx.lineWidth = 1.5;
@@ -269,11 +318,6 @@ export class HighSpeedHandTracker {
     }
 
     ctx.save();
-
-    // Helper to get mirrored screen coordinates:
-    // Mirrored video maps raw normalized x to (1 - pt.x) * width
-    const getX = (pt: HandLandmark) => (1 - pt.x) * width;
-    const getY = (pt: HandLandmark) => pt.y * height;
 
     // Track index fingertip for kinetic velocity ribbon
     const indexTip = landmarks[8];
@@ -298,6 +342,20 @@ export class HighSpeedHandTracker {
       }
     }
 
+    // Connect Index Tip to Target if in Target Reaching Mode
+    if (isTargetMode && targetState) {
+      const tgX = targetState.targetX * width;
+      const tgY = targetState.targetY * height;
+      ctx.beginPath();
+      ctx.moveTo(curIx, curIy);
+      ctx.lineTo(tgX, tgY);
+      ctx.setLineDash([5, 5]);
+      ctx.strokeStyle = targetState.isTargetLocked ? 'rgba(16, 185, 129, 0.8)' : 'rgba(245, 158, 11, 0.75)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
     // 2. Draw Biometric Bones by Anatomical Finger Group
     const drawChain = (chain: [number, number][], strokeColor: string, lineWidth = 3.5) => {
       ctx.strokeStyle = strokeColor;
@@ -314,17 +372,11 @@ export class HighSpeedHandTracker {
       });
     };
 
-    // Palm bridge
     drawChain(BONE_CHAINS.palmBridges, 'rgba(148, 163, 184, 0.7)', 2);
-    // Thumb: Emerald
     drawChain(BONE_CHAINS.thumb, isPinching ? '#10b981' : '#059669', 3.5);
-    // Index: Cyan
     drawChain(BONE_CHAINS.index, isPinching ? '#10b981' : '#0284c7', 3.5);
-    // Middle: Sky Blue
     drawChain(BONE_CHAINS.middle, '#0ea5e9', 2.5);
-    // Ring: Indigo
     drawChain(BONE_CHAINS.ring, '#6366f1', 2.5);
-    // Pinky: Purple
     drawChain(BONE_CHAINS.pinky, '#a855f7', 2.5);
 
     // 3. Draw 21 Articulation Nodes

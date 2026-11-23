@@ -2,10 +2,12 @@
  * NeuroKinematics AI - Biomechanical & Neurological Motor Biomarker Engine
  * Evaluates MDS-UPDRS (Movement Disorder Society Unified Parkinson's Disease Rating Scale)
  * 
- * Standardized Clinical Protocols:
- * - MDS-UPDRS Task 3.4: Finger Tapping (Thumb to Index pinch kinematics, bradykinesia, amplitude decay)
+ * Clinical Protocols:
+ * - MDS-UPDRS Task 3.4: Finger Tapping (Bradykinesia, Hypokinesia Amplitude Decay)
+ * - MDS-UPDRS Task 3.12: Kinetic Reaching & Dysmetria (Cerebellar Intention Tremor vs Basal Ganglia)
  * - MDS-UPDRS Task 3.15: Postural Tremor of the Hands (Welch's FFT Power Spectral Density 0-16 Hz)
- * - Real-Time Joint Goniometry (MCP & PIP Flexion Angles in Degrees)
+ * - Real-Time Joint Goniometry (MCP & PIP Flexion Angles)
+ * - 4-Condition Neurological Movement Disorder Differential Classifier
  */
 
 export interface HandLandmark {
@@ -28,6 +30,24 @@ export interface TremorSpectrumBin {
   isPeak: boolean;
 }
 
+export interface MovementDisorderDifferential {
+  parkinsonsProb: number; // 0 - 100%
+  essentialTremorProb: number; // 0 - 100%
+  cerebellarAtaxiaProb: number; // 0 - 100%
+  healthyBaselineProb: number; // 0 - 100%
+  primaryPrediction: 'Idiopathic Parkinson\'s Disease (IPD)' | 'Essential Action Tremor (ET)' | 'Cerebellar Intention Ataxia' | 'Healthy Physiological Baseline';
+  clinicalRationale: string;
+}
+
+export interface TargetReachingState {
+  targetX: number; // Normalized 0-1
+  targetY: number; // Normalized 0-1
+  distanceToTargetMm: number;
+  isTargetLocked: boolean;
+  terminalOscillationMm: number; // Terminal intention tremor near target
+  pastPointingErrorMm: number; // Dysmetria overshooting
+}
+
 export interface KinematicsTelemetry {
   timestamp: number;
   // Current Live Geometric State
@@ -38,10 +58,13 @@ export interface KinematicsTelemetry {
   handConfidence: number; // 0-100%
   handedness: 'Right' | 'Left' | 'Unknown';
 
-  // Biomechanical Innovation: Joint Goniometry & Postural Stability
+  // Biomechanical Joint Goniometry & Stability
   indexFlexionDeg: number; // Index MCP-PIP angle in degrees
   thumbExtensionDeg: number; // Thumb CMC-MCP angle in degrees
   posturalStabilityIndex: number; // 0-100% stability metric
+
+  // MDS-UPDRS Task 3.12: Kinetic Target Reaching & Dysmetria
+  targetReaching: TargetReachingState;
   
   // Real-time Tremor FFT
   tremorFrequencyHz: number; // Dominant peak frequency in 0-16 Hz
@@ -56,13 +79,16 @@ export interface KinematicsTelemetry {
   amplitudeDecayPercent: number; // % reduction from initial taps to recent taps
   rhythmRegularityCv: number; // Coefficient of Variation of Inter-Tap Interval (CV_ITI %)
   freezingArrestsCount: number; // Number of motor blocks / hesitations (>1200ms)
+
+  // 4-Condition Neurological Differential Diagnosis Matrix
+  differential: MovementDisorderDifferential;
   
   // Clinical UPDRS Severity Grading
   updrsGrade: 0 | 1 | 2 | 3 | 4;
   updrsInterpretation: string;
   clinicalAlert: string | null;
 
-  // Recent Kinetic Waveform History for Oscilloscope (last 120 frames)
+  // Recent Kinetic Waveform History for Oscilloscope (last 180 frames)
   apertureHistory: { t: number; aperture: number; velocity: number }[];
 }
 
@@ -70,6 +96,7 @@ export class KinematicsEngine {
   private historyCapacity = 180;
   private apertureHistory: { t: number; aperture: number; velocity: number }[] = [];
   private wristHistory: { t: number; x: number; y: number }[] = [];
+  private indexTrajectory: { x: number; y: number; t: number }[] = [];
   private taps: TapEvent[] = [];
   
   private wasPinching = false;
@@ -80,11 +107,16 @@ export class KinematicsEngine {
   private freezingCount = 0;
   private lastMovementTime = Date.now();
 
+  // Task 3.12 Target coordinates (center-right target)
+  private targetX = 0.72;
+  private targetY = 0.38;
+
   private readonly MM_SCALE = 160; 
 
   public resetSession() {
     this.apertureHistory = [];
     this.wristHistory = [];
+    this.indexTrajectory = [];
     this.taps = [];
     this.wasPinching = false;
     this.lastTapTime = 0;
@@ -95,9 +127,6 @@ export class KinematicsEngine {
     this.lastMovementTime = Date.now();
   }
 
-  /**
-   * Process a single video frame with 21 3D landmarks
-   */
   public processLandmarks(
     landmarks: HandLandmark[] | null,
     handedness: 'Right' | 'Left' | 'Unknown' = 'Right',
@@ -139,13 +168,41 @@ export class KinematicsEngine {
       this.wristHistory.shift();
     }
 
-    // 3. Biomechanical Joint Goniometry (Angle Calculation)
-    // Index MCP angle: Joint 5 -> Joint 6 -> Joint 7
+    // Index trajectory for Task 3.12 (Finger-to-target reach)
+    this.indexTrajectory.push({ x: indexTip.x, y: indexTip.y, t: now });
+    if (this.indexTrajectory.length > 60) {
+      this.indexTrajectory.shift();
+    }
+
+    // 3. Biomechanical Joint Goniometry
     const indexFlexionDeg = this.calculateJointAngle(landmarks[5], landmarks[6], landmarks[7]);
-    // Thumb CMC-MCP angle: Joint 1 -> Joint 2 -> Joint 3
     const thumbExtensionDeg = this.calculateJointAngle(landmarks[1], landmarks[2], landmarks[3]);
 
-    // 4. Pinch Event Detection
+    // 4. Task 3.12: Kinetic Target Reaching & Dysmetria Analysis
+    // Distance from mirrored index tip to target (target is at x=0.72, y=0.38)
+    const mirroredIndexX = 1 - indexTip.x;
+    const distToTargetNorm = Math.sqrt(
+      Math.pow(mirroredIndexX - this.targetX, 2) + Math.pow(indexTip.y - this.targetY, 2)
+    );
+    const distanceToTargetMm = Math.round(distToTargetNorm * this.MM_SCALE * 1.5 * 10) / 10;
+    const isTargetLocked = distanceToTargetMm < 25;
+
+    // Calculate terminal intention oscillation (variance near target)
+    let terminalOscillationMm = 0;
+    let pastPointingErrorMm = 0;
+    if (this.indexTrajectory.length >= 10 && distanceToTargetMm < 40) {
+      const recentPoints = this.indexTrajectory.slice(-10);
+      const meanX = recentPoints.reduce((acc, p) => acc + (1 - p.x), 0) / recentPoints.length;
+      const meanY = recentPoints.reduce((acc, p) => acc + p.y, 0) / recentPoints.length;
+      const variance = recentPoints.reduce(
+        (acc, p) => acc + Math.pow((1 - p.x) - meanX, 2) + Math.pow(p.y - meanY, 2),
+        0
+      ) / recentPoints.length;
+      terminalOscillationMm = Math.round(Math.sqrt(variance) * this.MM_SCALE * 10) / 10;
+      pastPointingErrorMm = Math.max(0, Math.round((distanceToTargetMm - 10) * 10) / 10);
+    }
+
+    // 5. Pinch Event Detection
     const isPinching = apertureMm < 18;
 
     if (!this.wasPinching && isPinching) {
@@ -186,10 +243,10 @@ export class KinematicsEngine {
       this.lastMovementTime = now;
     }
 
-    // 5. Calculate Welch's Fast Fourier Transform (FFT) Power Spectrum for Tremor
+    // 6. Calculate Welch's Fast Fourier Transform (FFT) Power Spectrum for Tremor
     const { peakFreq, peakPower, classification, bins } = this.computeTremorFFT();
 
-    // 6. Aggregate MDS-UPDRS Task 3.4 Summary Statistics
+    // 7. Aggregate MDS-UPDRS Task 3.4 Summary Statistics
     const totalTaps = this.taps.length;
     let meanCadenceHz = 0;
     let meanVelocityMmS = 0;
@@ -221,10 +278,20 @@ export class KinematicsEngine {
       }
     }
 
-    // Postural Stability Metric (100% when steady, drops when trembling)
     const posturalStabilityIndex = Math.max(0, Math.min(100, Math.round(100 - (peakPower * 4.5))));
 
-    // 7. Clinical MDS-UPDRS Rating Evaluation
+    // 8. Compute 4-Disorder Neurological Differential Diagnosis
+    const differential = this.computeMovementDisorderDifferential(
+      meanCadenceHz,
+      amplitudeDecayPercent,
+      rhythmRegularityCv,
+      peakFreq,
+      peakPower,
+      terminalOscillationMm,
+      pastPointingErrorMm
+    );
+
+    // 9. Clinical MDS-UPDRS Rating Evaluation
     const { grade, interpretation, alert } = this.evaluateUprdGrade(
       meanCadenceHz,
       amplitudeDecayPercent,
@@ -246,6 +313,14 @@ export class KinematicsEngine {
       indexFlexionDeg,
       thumbExtensionDeg,
       posturalStabilityIndex,
+      targetReaching: {
+        targetX: this.targetX,
+        targetY: this.targetY,
+        distanceToTargetMm,
+        isTargetLocked,
+        terminalOscillationMm,
+        pastPointingErrorMm
+      },
       tremorFrequencyHz: peakFreq,
       tremorPowerMm2: peakPower,
       tremorClassification: classification,
@@ -256,6 +331,7 @@ export class KinematicsEngine {
       amplitudeDecayPercent,
       rhythmRegularityCv,
       freezingArrestsCount: this.freezingCount,
+      differential,
       updrsGrade: grade,
       updrsInterpretation: interpretation,
       clinicalAlert: alert,
@@ -264,8 +340,91 @@ export class KinematicsEngine {
   }
 
   /**
-   * Biomechanical Angle Calculation between 3 3D joints (A-B-C) in degrees
+   * Continuous 4-Condition Neurological Differential Diagnosis Engine
+   * Separates Parkinson's, Essential Tremor, Cerebellar Ataxia, and Healthy Baseline
    */
+  private computeMovementDisorderDifferential(
+    cadence: number,
+    decay: number,
+    cv: number,
+    tremorFreq: number,
+    tremorPower: number,
+    terminalOscillation: number,
+    pastPointing: number
+  ): MovementDisorderDifferential {
+    let pdScore = 5;
+    let etScore = 5;
+    let caScore = 5;
+    let nlScore = 50;
+
+    // 1. Bradykinesia & Sequence Effect evaluation (Strong Parkinsonian Indicator)
+    if (decay >= 35 || (cadence > 0 && cadence < 2.5)) {
+      pdScore += 45;
+      nlScore -= 30;
+    } else if (decay >= 20 || (cadence > 0 && cadence < 3.2)) {
+      pdScore += 25;
+      nlScore -= 15;
+    }
+
+    // 2. Frequency Spectral Banding
+    if (tremorPower > 3.0) {
+      if (tremorFreq >= 4.0 && tremorFreq <= 6.5) {
+        // Signature Parkinson's 4-6 Hz resting band
+        pdScore += 40;
+        etScore += 5;
+        nlScore -= 35;
+      } else if (tremorFreq >= 7.5 && tremorFreq <= 12.0) {
+        // Signature Essential Tremor 8-12 Hz postural band
+        etScore += 65;
+        pdScore += 5;
+        nlScore -= 35;
+      }
+    }
+
+    // 3. Cerebellar Dysmetria & Terminal Intention Tremor (Task 3.12)
+    if (terminalOscillation > 6.0 || pastPointing > 25) {
+      caScore += 60;
+      pdScore -= 10;
+      nlScore -= 30;
+    }
+
+    // Normal baseline reinforcement if tapping is fast & regular
+    if (cadence >= 3.5 && decay < 15 && tremorPower < 1.5 && terminalOscillation < 3.0) {
+      nlScore += 40;
+    }
+
+    // Normalize probabilities to 100%
+    const totalScore = Math.max(1, pdScore + etScore + caScore + Math.max(0, nlScore));
+    const pPd = Math.round((pdScore / totalScore) * 100);
+    const pEt = Math.round((etScore / totalScore) * 100);
+    const pCa = Math.round((caScore / totalScore) * 100);
+    const pNl = Math.max(0, 100 - (pPd + pEt + pCa));
+
+    // Determine primary diagnostic prediction
+    let primary: MovementDisorderDifferential['primaryPrediction'] = 'Healthy Physiological Baseline';
+    let rationale = 'Normal reciprocal cadence (>3.5 Hz), absent decremental fatigue, and stable target acquisition.';
+
+    if (pPd > pEt && pPd > pCa && pPd >= 40) {
+      primary = 'Idiopathic Parkinson\'s Disease (IPD)';
+      rationale = `Decremental amplitude decay (${decay}%) and 4-6 Hz basal ganglia resting frequency suggest dopaminergic deficiency.`;
+    } else if (pEt > pPd && pEt > pCa && pEt >= 40) {
+      primary = 'Essential Action Tremor (ET)';
+      rationale = `High-frequency 8-12 Hz kinetic oscillation with preserved reciprocal finger tapping cadence (no bradykinesia).`;
+    } else if (pCa > pPd && pCa > pEt && pCa >= 40) {
+      primary = 'Cerebellar Intention Ataxia';
+      rationale = `Terminal intention dysmetria (${terminalOscillation} mm) on kinetic target reach points to cerebello-rubro-thalamic dysfunction.`;
+    }
+
+    return {
+      parkinsonsProb: pPd,
+      essentialTremorProb: pEt,
+      cerebellarAtaxiaProb: pCa,
+      healthyBaselineProb: pNl,
+      primaryPrediction: primary,
+      clinicalRationale: rationale
+    };
+  }
+
   private calculateJointAngle(a: HandLandmark, b: HandLandmark, c: HandLandmark): number {
     const v1x = a.x - b.x;
     const v1y = a.y - b.y;
@@ -386,7 +545,7 @@ export class KinematicsEngine {
       return {
         grade: 3,
         interpretation: `High-amplitude 4-6 Hz resting tremor (${tremorFreq} Hz, ${tremorPower} mm²). Subthalamic nucleus synchrony detected.`,
-        alert: `⚠️ PARKINSONIAN RESTING TREMOR DETECTED: ${tremorFreq} Hz PEAK`
+        alert: `⚠️ PARKINSONIAN RESTING TREMOR: ${tremorFreq} Hz PEAK`
       };
     }
 
@@ -441,6 +600,14 @@ export class KinematicsEngine {
       indexFlexionDeg: 180,
       thumbExtensionDeg: 180,
       posturalStabilityIndex: 100,
+      targetReaching: {
+        targetX: this.targetX,
+        targetY: this.targetY,
+        distanceToTargetMm: 999,
+        isTargetLocked: false,
+        terminalOscillationMm: 0,
+        pastPointingErrorMm: 0
+      },
       tremorFrequencyHz: 0,
       tremorPowerMm2: 0,
       tremorClassification: 'Healthy Baseline',
@@ -455,6 +622,14 @@ export class KinematicsEngine {
       amplitudeDecayPercent: 0,
       rhythmRegularityCv: 0,
       freezingArrestsCount: this.freezingCount,
+      differential: {
+        parkinsonsProb: 5,
+        essentialTremorProb: 5,
+        cerebellarAtaxiaProb: 0,
+        healthyBaselineProb: 90,
+        primaryPrediction: 'Healthy Physiological Baseline',
+        clinicalRationale: 'Align hand within the camera reticle to begin real-time motor telemetry.'
+      },
       updrsGrade: 0,
       updrsInterpretation: 'Align hand within the camera reticle to begin motor kinematic telemetry.',
       clinicalAlert: null,

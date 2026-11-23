@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Camera, VideoOff, Activity, ShieldCheck, Maximize2, Minimize2,
-  Volume2, VolumeX, FileText, RefreshCw, AlertTriangle, CheckCircle2, ChevronRight
+  Volume2, VolumeX, FileText, RefreshCw, AlertTriangle, CheckCircle2, ChevronRight, Target
 } from 'lucide-react';
 import { KinematicsEngine, KinematicsTelemetry } from './engines/kinematicsEngine';
 import { HighSpeedHandTracker } from './engines/handTracker';
 import { audioSonifier } from './engines/audioSonifier';
 import { HeaderNav } from './components/HeaderNav';
 import { KinematicsReportModal } from './components/KinematicsReportModal';
+import { JudgeDefenseModal } from './components/JudgeDefenseModal';
 
 export const App: React.FC = () => {
   // Camera & Stream State
@@ -16,6 +17,13 @@ export const App: React.FC = () => {
   const [engineType, setEngineType] = useState<string>('Initializing Engine...');
   const [isAudioMuted, setIsAudioMuted] = useState<boolean>(false);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+
+  // Active Examination Protocol
+  const [activeProtocol, setActiveProtocol] = useState<'task-3-4' | 'task-3-12' | 'task-3-15'>('task-3-4');
+
+  // Modals
+  const [isReportOpen, setIsReportOpen] = useState<boolean>(false);
+  const [isDefenseModalOpen, setIsDefenseModalOpen] = useState<boolean>(false);
 
   // Raw Landmark Coordinates for Live Transparency Inspector
   const [rawCoordinates, setRawCoordinates] = useState<{
@@ -32,7 +40,6 @@ export const App: React.FC = () => {
 
   // Telemetry Output State
   const [telemetry, setTelemetry] = useState<KinematicsTelemetry | null>(null);
-  const [isReportOpen, setIsReportOpen] = useState<boolean>(false);
 
   // DOM References
   const mainContainerRef = useRef<HTMLDivElement | null>(null);
@@ -137,6 +144,7 @@ export const App: React.FC = () => {
     if (!isCameraActive) return;
 
     let wasPreviouslyPinching = false;
+    let wasTargetPreviouslyLocked = false;
 
     const renderLoop = () => {
       const video = videoRef.current;
@@ -154,7 +162,6 @@ export const App: React.FC = () => {
       }
 
       if (video && overlayCanvas && tracker && video.readyState >= 2) {
-        // Match canvas dimensions to the exact rendered video dimensions
         const width = video.videoWidth || 1280;
         const height = video.videoHeight || 720;
 
@@ -169,7 +176,7 @@ export const App: React.FC = () => {
         const trackResult = tracker.trackHand(video);
         setEngineType(trackResult.engineType);
 
-        // 2. Process Real Kinematics with Biomechanical Goniometry
+        // 2. Process Real Kinematics with Biomechanical Goniometry & Target Protocol
         const telemetryResult = engine.processLandmarks(
           trackResult.landmarks,
           trackResult.handedness,
@@ -189,16 +196,20 @@ export const App: React.FC = () => {
           }));
         }
 
-        // 4. Acoustic Sonification on Pinch Impact
+        // 4. Acoustic Sonification on Pinch Contact or Target Lock
         if (!wasPreviouslyPinching && telemetryResult.isPinching) {
           audioSonifier.playPinchClick();
+        }
+        if (activeProtocol === 'task-3-12' && !wasTargetPreviouslyLocked && telemetryResult.targetReaching.isTargetLocked) {
+          audioSonifier.playMetronomeTick(true);
         }
         if (telemetryResult.clinicalAlert && !wasPreviouslyPinching && telemetryResult.isPinching) {
           audioSonifier.playWarningAlert();
         }
         wasPreviouslyPinching = telemetryResult.isPinching;
+        wasTargetPreviouslyLocked = telemetryResult.targetReaching.isTargetLocked;
 
-        // 5. Render Glowing 3D Biometric Skeleton (WITHOUT MIRRORED TEXT!)
+        // 5. Render Glowing 3D Biometric Skeleton & Target Reticle
         if (overlayCtx) {
           tracker.renderOverlay(
             overlayCtx,
@@ -208,7 +219,9 @@ export const App: React.FC = () => {
             telemetryResult.pinchApertureMm,
             telemetryResult.instantVelocityMmS,
             telemetryResult.isPinching,
-            telemetryResult.indexFlexionDeg
+            telemetryResult.indexFlexionDeg,
+            telemetryResult.targetReaching,
+            activeProtocol === 'task-3-12'
           );
         }
 
@@ -227,7 +240,7 @@ export const App: React.FC = () => {
         animFrameIdRef.current = null;
       }
     };
-  }, [isCameraActive]);
+  }, [isCameraActive, activeProtocol]);
 
   // Draw 60 FPS Real-Time Kinetic Oscilloscope
   useEffect(() => {
@@ -318,11 +331,14 @@ export const App: React.FC = () => {
         onToggleFullscreen={toggleFullscreen}
         onResetSession={handleResetSession}
         onOpenReport={() => setIsReportOpen(true)}
+        onOpenDefenseGuide={() => setIsDefenseModalOpen(true)}
         isCameraActive={isCameraActive}
         engineType={engineType}
+        activeProtocol={activeProtocol}
+        onSelectProtocol={setActiveProtocol}
       />
 
-      {/* FULLSCREEN HERO CAMERA VIEWPORT (Strictly Fitted to Viewport - Zero Overflow) */}
+      {/* FULLSCREEN HERO CAMERA VIEWPORT */}
       <div style={{ flex: 1, minHeight: 0, position: 'relative', width: '100%', height: 'calc(100vh - 65px)', overflow: 'hidden', background: '#020617', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         
         {/* Mirrored Video Feed with Clean Object-Fit Contain */}
@@ -333,13 +349,13 @@ export const App: React.FC = () => {
           style={{ width: '100%', height: '100%', objectFit: 'contain', transform: 'scaleX(-1)' }}
         />
 
-        {/* 60 FPS 21-Joint Biometric Skeleton Overlay Canvas (NO CSS SCALEX(-1), COORDINATES ARE MIRRORED IN MATH!) */}
+        {/* 60 FPS 21-Joint Biometric Skeleton Overlay Canvas (Coordinates mathematically mirrored!) */}
         <canvas
           ref={overlayCanvasRef}
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', objectFit: 'contain' }}
         />
 
-        {/* IDLE HERO STATE (Before Camera Enables) */}
+        {/* IDLE HERO STATE */}
         {!isCameraActive && (
           <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'radial-gradient(circle at center, rgba(15, 23, 42, 0.88) 0%, rgba(2, 6, 23, 0.98) 100%)', color: '#ffffff', padding: '1.5rem', textAlign: 'center', zIndex: 10 }}>
             <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: 'rgba(2, 132, 199, 0.15)', border: '2px solid #0284c7', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '1rem', color: '#38bdf8', boxShadow: '0 0 30px rgba(2, 132, 199, 0.4)' }}>
@@ -349,7 +365,7 @@ export const App: React.FC = () => {
               Autonomous 3D Motor Kinematics Scanner
             </h2>
             <p style={{ fontSize: '0.85rem', color: '#94a3b8', maxWidth: '480px', margin: '0 0 1.5rem 0', lineHeight: 1.45 }}>
-              Launch your webcam to track all 21 hand joints at 60 FPS. Computes real-time tapping cadence, amplitude fatigue, joint goniometry angles, and Welch's FFT tremor spectra.
+              60 FPS GPU-accelerated motion capture. Evaluates bradykinesia sequence effects, 4-condition movement disorder differential probabilities, and cerebellar dysmetria.
             </p>
             <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
               <button
@@ -370,12 +386,12 @@ export const App: React.FC = () => {
         )}
 
         {/* =========================================================================
-            RESPONSIVE FLOATING CLINICAL HUD PANELS (Fitted Cleanly in Viewport)
+            RESPONSIVE FLOATING CLINICAL HUD PANELS
             ========================================================================= */}
         {isCameraActive && (
           <>
             {/* 1. TOP-LEFT HUD: LIVE RAW 3D COORDINATE TELEMETRY STREAM */}
-            <div style={{ position: 'absolute', top: '0.75rem', left: '0.75rem', background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: '8px', padding: '0.75rem 1rem', width: '260px', pointerEvents: 'none', zIndex: 20, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
+            <div style={{ position: 'absolute', top: '0.75rem', left: '0.75rem', background: 'rgba(15, 23, 42, 0.88)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: '8px', padding: '0.75rem 1rem', width: '270px', pointerEvents: 'none', zIndex: 20, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem', borderBottom: '1px solid rgba(255, 255, 255, 0.1)', paddingBottom: '0.3rem' }}>
                 <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                   Live 3D Telemetry
@@ -399,80 +415,100 @@ export const App: React.FC = () => {
                   <span>{rawCoordinates.wrist.x.toFixed(3)}, {rawCoordinates.wrist.y.toFixed(3)}</span>
                 </div>
                 <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '0.25rem', marginTop: '0.15rem', display: 'flex', justifyContent: 'space-between', fontWeight: 800, color: telemetry?.isPinching ? '#10b981' : '#ffffff' }}>
-                  <span>Aperture:</span>
+                  <span>Pinch Aperture:</span>
                   <span>{telemetry ? `${telemetry.pinchApertureMm} mm` : '0 mm'}</span>
                 </div>
               </div>
             </div>
 
-            {/* 2. TOP-RIGHT HUD: QUANTITATIVE MDS-UPDRS SCOREBOARD & JOINT GONIOMETRY */}
-            <div style={{ position: 'absolute', top: '0.75rem', right: '0.75rem', background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: '8px', padding: '0.75rem 1rem', width: '280px', pointerEvents: 'none', zIndex: 20, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
+            {/* 2. TOP-RIGHT HUD: 4-WAY NEUROLOGICAL DIFFERENTIAL DIAGNOSTIC MATRIX */}
+            <div style={{ position: 'absolute', top: '0.75rem', right: '0.75rem', background: 'rgba(15, 23, 42, 0.88)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: '8px', padding: '0.75rem 1rem', width: '305px', pointerEvents: 'none', zIndex: 20, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
               
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem', borderBottom: '1px solid rgba(255, 255, 255, 0.1)', paddingBottom: '0.3rem' }}>
                 <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  MDS-UPDRS Motor Rating
+                  4-Disorder Differential Matrix
                 </span>
-                <span style={{ fontSize: '0.7rem', fontWeight: 900, padding: '0.12rem 0.5rem', borderRadius: '4px', background: !telemetry || telemetry.updrsGrade === 0 ? 'rgba(16, 185, 129, 0.2)' : telemetry.updrsGrade <= 2 ? 'rgba(245, 158, 11, 0.2)' : 'rgba(239, 68, 68, 0.25)', color: !telemetry || telemetry.updrsGrade === 0 ? '#34d399' : telemetry.updrsGrade <= 2 ? '#fbbf24' : '#f87171', border: '1px solid currentColor' }}>
-                  GRADE {telemetry ? telemetry.updrsGrade : 0} / 4
+                <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#fbbf24', textTransform: 'uppercase' }}>
+                  Continuous Baye
                 </span>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.4rem', marginTop: '0.4rem' }}>
-                <div style={{ background: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px', padding: '0.4rem 0.5rem' }}>
-                  <span style={{ fontSize: '0.62rem', color: '#94a3b8', textTransform: 'uppercase' }}>Cadence</span>
-                  <p style={{ margin: 0, fontSize: '1rem', fontWeight: 900, color: '#ffffff', fontFamily: 'monospace' }}>
-                    {telemetry ? `${telemetry.meanCadenceHz} Hz` : '0 Hz'}
-                  </p>
+              {/* Differential Probabilities Progress Bars */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', marginTop: '0.4rem' }}>
+                
+                {/* Parkinson's Disease (IPD) */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.66rem', fontWeight: 700, color: '#f87171' }}>
+                    <span>Idiopathic Parkinson's (IPD)</span>
+                    <span style={{ fontFamily: 'monospace' }}>{telemetry ? `${telemetry.differential.parkinsonsProb}%` : '5%'}</span>
+                  </div>
+                  <div style={{ height: '4px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '2px', overflow: 'hidden', marginTop: '2px' }}>
+                    <div style={{ width: `${telemetry ? telemetry.differential.parkinsonsProb : 5}%`, height: '100%', background: '#ef4444', transition: 'width 0.2s ease' }} />
+                  </div>
                 </div>
 
-                <div style={{ background: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px', padding: '0.4rem 0.5rem' }}>
-                  <span style={{ fontSize: '0.62rem', color: '#94a3b8', textTransform: 'uppercase' }}>Amplitude Decay</span>
-                  <p style={{ margin: 0, fontSize: '1rem', fontWeight: 900, color: telemetry && telemetry.amplitudeDecayPercent > 30 ? '#f87171' : '#ffffff', fontFamily: 'monospace' }}>
-                    {telemetry ? `${telemetry.amplitudeDecayPercent}%` : '0%'}
-                  </p>
+                {/* Essential Tremor (ET) */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.66rem', fontWeight: 700, color: '#c084fc' }}>
+                    <span>Essential Action Tremor (ET)</span>
+                    <span style={{ fontFamily: 'monospace' }}>{telemetry ? `${telemetry.differential.essentialTremorProb}%` : '5%'}</span>
+                  </div>
+                  <div style={{ height: '4px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '2px', overflow: 'hidden', marginTop: '2px' }}>
+                    <div style={{ width: `${telemetry ? telemetry.differential.essentialTremorProb : 5}%`, height: '100%', background: '#a855f7', transition: 'width 0.2s ease' }} />
+                  </div>
                 </div>
 
-                <div style={{ background: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px', padding: '0.4rem 0.5rem' }}>
-                  <span style={{ fontSize: '0.62rem', color: '#94a3b8', textTransform: 'uppercase' }}>Index Flexion</span>
-                  <p style={{ margin: 0, fontSize: '1rem', fontWeight: 900, color: '#38bdf8', fontFamily: 'monospace' }}>
-                    {telemetry ? `${telemetry.indexFlexionDeg}°` : '180°'}
-                  </p>
+                {/* Cerebellar Ataxia (CA) */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.66rem', fontWeight: 700, color: '#fbbf24' }}>
+                    <span>Cerebellar Intention Ataxia</span>
+                    <span style={{ fontFamily: 'monospace' }}>{telemetry ? `${telemetry.differential.cerebellarAtaxiaProb}%` : '0%'}</span>
+                  </div>
+                  <div style={{ height: '4px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '2px', overflow: 'hidden', marginTop: '2px' }}>
+                    <div style={{ width: `${telemetry ? telemetry.differential.cerebellarAtaxiaProb : 0}%`, height: '100%', background: '#f59e0b', transition: 'width 0.2s ease' }} />
+                  </div>
                 </div>
 
-                <div style={{ background: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px', padding: '0.4rem 0.5rem' }}>
-                  <span style={{ fontSize: '0.62rem', color: '#94a3b8', textTransform: 'uppercase' }}>Tremor Peak</span>
-                  <p style={{ margin: 0, fontSize: '1rem', fontWeight: 900, color: telemetry && telemetry.tremorFrequencyHz > 0 ? '#f87171' : '#34d399', fontFamily: 'monospace' }}>
-                    {telemetry && telemetry.tremorFrequencyHz > 0 ? `${telemetry.tremorFrequencyHz} Hz` : '0 Hz'}
-                  </p>
+                {/* Healthy Control (NL) */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.66rem', fontWeight: 700, color: '#34d399' }}>
+                    <span>Healthy Physiological Baseline</span>
+                    <span style={{ fontFamily: 'monospace' }}>{telemetry ? `${telemetry.differential.healthyBaselineProb}%` : '90%'}</span>
+                  </div>
+                  <div style={{ height: '4px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '2px', overflow: 'hidden', marginTop: '2px' }}>
+                    <div style={{ width: `${telemetry ? telemetry.differential.healthyBaselineProb : 90}%`, height: '100%', background: '#10b981', transition: 'width 0.2s ease' }} />
+                  </div>
                 </div>
+
               </div>
 
-              <div style={{ marginTop: '0.4rem', borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '0.3rem', display: 'flex', justifyContent: 'space-between', fontSize: '0.65rem', color: '#94a3b8' }}>
-                <span>Stability Index:</span>
-                <span style={{ fontWeight: 800, color: '#34d399' }}>{telemetry ? `${telemetry.posturalStabilityIndex}%` : '100%'}</span>
+              {/* Clinical Interpretation */}
+              <div style={{ marginTop: '0.5rem', borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '0.4rem', fontSize: '0.66rem', color: '#94a3b8', lineHeight: 1.3 }}>
+                <span style={{ color: '#38bdf8', fontWeight: 700 }}>Inference: </span>
+                {telemetry?.differential.primaryPrediction || 'Calibrating motor baseline...'}
               </div>
             </div>
 
             {/* 3. BOTTOM-LEFT HUD: 60 FPS KINETIC OSCILLOSCOPE d(t) */}
-            <div style={{ position: 'absolute', bottom: '0.75rem', left: '0.75rem', background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: '8px', padding: '0.65rem 0.85rem', width: '300px', pointerEvents: 'none', zIndex: 20, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
+            <div style={{ position: 'absolute', bottom: '0.75rem', left: '0.75rem', background: 'rgba(15, 23, 42, 0.88)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: '8px', padding: '0.65rem 0.85rem', width: '300px', pointerEvents: 'none', zIndex: 20, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.3rem' }}>
                 <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  Pinch Aperture Waveform d(t)
+                  Aperture Waveform d(t)
                 </span>
                 <span style={{ fontSize: '0.65rem', color: '#94a3b8', fontFamily: 'monospace' }}>
-                  {telemetry ? `${telemetry.totalTaps} Taps` : '0 Taps'}
+                  {telemetry ? `${telemetry.totalTaps} Taps • Cadence: ${telemetry.meanCadenceHz}Hz` : '0 Taps'}
                 </span>
               </div>
               <canvas
                 ref={oscilloscopeRef}
                 width={280}
-                height={60}
-                style={{ width: '100%', height: '60px', borderRadius: '4px' }}
+                height={55}
+                style={{ width: '100%', height: '55px', borderRadius: '4px' }}
               />
             </div>
 
             {/* 4. BOTTOM-RIGHT HUD: REAL-TIME WELCH'S FFT TREMOR POWER SPECTRUM */}
-            <div style={{ position: 'absolute', bottom: '0.75rem', right: '0.75rem', background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: '8px', padding: '0.65rem 0.85rem', width: '300px', pointerEvents: 'none', zIndex: 20, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
+            <div style={{ position: 'absolute', bottom: '0.75rem', right: '0.75rem', background: 'rgba(15, 23, 42, 0.88)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: '8px', padding: '0.65rem 0.85rem', width: '300px', pointerEvents: 'none', zIndex: 20, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.3rem' }}>
                 <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                   Tremor FFT Spectrum (0–16 Hz)
@@ -504,16 +540,16 @@ export const App: React.FC = () => {
 
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.2rem', fontSize: '0.6rem', color: '#64748b', fontFamily: 'monospace' }}>
                 <span>0 Hz</span>
-                <span style={{ color: '#f87171' }}>4-6 Hz (PD)</span>
-                <span style={{ color: '#c084fc' }}>8-12 Hz (ET)</span>
+                <span style={{ color: '#f87171' }}>4-6 Hz (Parkinson)</span>
+                <span style={{ color: '#c084fc' }}>8-12 Hz (Essential)</span>
                 <span>16 Hz</span>
               </div>
             </div>
 
             {/* 5. BOTTOM-CENTER HUD: INSTANTANEOUS CLINICAL ALERT BANNER */}
-            <div style={{ position: 'absolute', bottom: '0.75rem', left: '50%', transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', gap: '0.5rem', background: telemetry?.clinicalAlert ? 'rgba(220, 38, 38, 0.95)' : 'rgba(15, 23, 42, 0.88)', backdropFilter: 'blur(8px)', border: `1px solid ${telemetry?.clinicalAlert ? '#fca5a5' : 'rgba(255, 255, 255, 0.15)'}`, padding: '0.45rem 1.15rem', borderRadius: '30px', color: '#ffffff', fontSize: '0.75rem', fontWeight: 800, pointerEvents: 'none', zIndex: 20, boxShadow: '0 4px 20px rgba(0,0,0,0.4)' }}>
-              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: telemetry?.clinicalAlert ? '#ffffff' : telemetry?.isPinching ? '#10b981' : '#38bdf8' }}></span>
-              {telemetry?.clinicalAlert || (telemetry?.isPinching ? 'FINGER PINCH CONTACT DETECTED' : 'BIOMECHANICAL MOTOR TELEMETRY ACTIVE')}
+            <div style={{ position: 'absolute', bottom: '0.75rem', left: '50%', transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', gap: '0.5rem', background: telemetry?.clinicalAlert ? 'rgba(220, 38, 38, 0.95)' : telemetry?.targetReaching.isTargetLocked ? 'rgba(16, 185, 129, 0.95)' : 'rgba(15, 23, 42, 0.88)', backdropFilter: 'blur(8px)', border: `1px solid ${telemetry?.clinicalAlert ? '#fca5a5' : telemetry?.targetReaching.isTargetLocked ? '#86efac' : 'rgba(255, 255, 255, 0.15)'}`, padding: '0.45rem 1.15rem', borderRadius: '30px', color: '#ffffff', fontSize: '0.75rem', fontWeight: 800, pointerEvents: 'none', zIndex: 20, boxShadow: '0 4px 20px rgba(0,0,0,0.4)' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ffffff' }}></span>
+              {telemetry?.clinicalAlert || (activeProtocol === 'task-3-12' ? (telemetry?.targetReaching.isTargetLocked ? '🎯 TARGET LOCKED: CEREBELLAR DYSMETRIA < 3mm' : `REACH TOWARD TARGET (${telemetry?.targetReaching.distanceToTargetMm} mm)`) : telemetry?.isPinching ? 'FINGER PINCH CONTACT DETECTED' : 'BIOMECHANICAL MOTOR TELEMETRY ACTIVE')}
             </div>
 
             {/* Stop Vision Floating Button (Top Center) */}
@@ -538,9 +574,15 @@ export const App: React.FC = () => {
           telemetry={telemetry}
           subjectName="Live Clinical Evaluator"
           subjectType="Evaluator (Judge Baseline)"
-          protocolName="MDS-UPDRS Part III Motor Examination Protocol"
+          protocolName={activeProtocol === 'task-3-4' ? 'MDS-UPDRS Task 3.4 (Finger Tapping)' : activeProtocol === 'task-3-12' ? 'MDS-UPDRS Task 3.12 (Kinetic Reaching Dysmetria)' : 'MDS-UPDRS Task 3.15 (Postural Tremor FFT)'}
         />
       )}
+
+      {/* Interactive Academic Viva Defense Guide Modal */}
+      <JudgeDefenseModal
+        isOpen={isDefenseModalOpen}
+        onClose={() => setIsDefenseModalOpen(false)}
+      />
 
     </div>
   );
