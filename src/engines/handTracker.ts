@@ -1,8 +1,11 @@
 /**
  * Real-Time 21-Joint 3D Hand Tracking Engine with Biomechanical Goniometry
- * & Kinetic Target Reaching Protocol (MDS-UPDRS Task 3.12 Dysmetria)
+ * & Dual-Anchor Finger-to-Nose Protocol (MDS-UPDRS Task 3.12 / SARA Ataxia)
+ * 
+ * Powered by Official Google MediaPipe Tasks Vision (HandLandmarker & FaceLandmarker)
  */
 
+import { FilesetResolver, HandLandmarker, FaceLandmarker } from '@mediapipe/tasks-vision';
 import { HandLandmark, TargetReachingState, FingerToNoseState } from './kinematicsEngine';
 
 export const BONE_CHAINS: Record<string, [number, number][]> = {
@@ -15,99 +18,66 @@ export const BONE_CHAINS: Record<string, [number, number][]> = {
 };
 
 export class HighSpeedHandTracker {
-  private mpHands: any = null;
-  private mpFace: any = null;
-  private isMpReady = false;
-  private isProcessing = false;
-  private isFaceProcessing = false;
+  private handLandmarker: HandLandmarker | null = null;
+  private faceLandmarker: FaceLandmarker | null = null;
+  private isVisionLoading = false;
+  private isVisionReady = false;
+  private lastTimestamp = -1;
+
   private latestLandmarks: HandLandmark[] | null = null;
   private latestNose: HandLandmark | null = null;
-  private latestHandedness: 'Right' | 'Left' | 'Unknown' = 'Unknown';
+  private latestHandedness: 'Right' | 'Left' | 'Unknown' = 'Right';
   private latestConfidence = 0;
 
   // Kinetic Trajectory Ribbon History (last 16 frames of index tip)
   private indexTrail: { x: number; y: number; t: number }[] = [];
 
-  private offscreenCanvas: HTMLCanvasElement;
-  private offscreenCtx: CanvasRenderingContext2D | null;
-
   constructor() {
-    this.offscreenCanvas = document.createElement('canvas');
-    this.offscreenCanvas.width = 320;
-    this.offscreenCanvas.height = 240;
-    this.offscreenCtx = this.offscreenCanvas.getContext('2d', { willReadFrequently: true });
-    
-    this.initMediaPipe();
+    this.initVision();
   }
 
-  private initMediaPipe() {
+  public async initVision() {
+    if (this.isVisionLoading || this.isVisionReady) return;
+    this.isVisionLoading = true;
+
     try {
-      const HandsClass = (window as any).Hands;
-      if (HandsClass && !this.mpHands) {
-        this.mpHands = new HandsClass({
-          locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
-        });
+      console.log('⏳ Initializing Google MediaPipe Vision Tasks...');
+      const vision = await FilesetResolver.forVisionTasks(
+        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
+      );
 
-        this.mpHands.setOptions({
-          maxNumHands: 1,
-          modelComplexity: 1,
-          minDetectionConfidence: 0.5,
-          minTrackingConfidence: 0.5
-        });
+      console.log('⏳ Instantiating HandLandmarker GPU Pipeline...');
+      this.handLandmarker = await HandLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+          delegate: 'GPU'
+        },
+        runningMode: 'VIDEO',
+        numHands: 1,
+        minHandDetectionConfidence: 0.35,
+        minHandPresenceConfidence: 0.35,
+        minTrackingConfidence: 0.35
+      });
 
-        this.mpHands.onResults((results: any) => {
-          this.isProcessing = false;
-          if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-            const raw = results.multiHandLandmarks[0];
-            this.latestLandmarks = raw.map((pt: any) => ({
-              x: pt.x,
-              y: pt.y,
-              z: pt.z || 0
-            }));
-            this.latestHandedness = (results.multiHandedness && results.multiHandedness[0]?.label) || 'Right';
-            this.latestConfidence = (results.multiHandedness && results.multiHandedness[0]?.score) || 0.95;
-            this.isMpReady = true;
-          } else {
-            this.latestLandmarks = null;
-          }
-        });
+      console.log('⏳ Instantiating FaceLandmarker GPU Pipeline...');
+      this.faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+          delegate: 'GPU'
+        },
+        runningMode: 'VIDEO',
+        numFaces: 1,
+        minFaceDetectionConfidence: 0.35,
+        minFacePresenceConfidence: 0.35,
+        minTrackingConfidence: 0.35
+      });
 
-        console.log('✓ Google MediaPipe Hands 21-Joint 3D Engine initialized');
-      }
-
-      // Initialize MediaPipe FaceMesh for Finger-to-Nose Protocol (Landmark 1: Nose Tip)
-      const FaceMeshClass = (window as any).FaceMesh;
-      if (FaceMeshClass && !this.mpFace) {
-        this.mpFace = new FaceMeshClass({
-          locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
-        });
-
-        this.mpFace.setOptions({
-          maxNumFaces: 1,
-          refineLandmarks: false,
-          minDetectionConfidence: 0.5,
-          minTrackingConfidence: 0.5
-        });
-
-        this.mpFace.onResults((results: any) => {
-          this.isFaceProcessing = false;
-          if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
-            const face = results.multiFaceLandmarks[0];
-            const nose = face[1] || face[4]; // Landmark 1: Anatomical tip of nose
-            if (nose) {
-              this.latestNose = {
-                x: nose.x,
-                y: nose.y,
-                z: nose.z || 0
-              };
-            }
-          }
-        });
-
-        console.log('✓ Google MediaPipe Face Mesh Engine initialized for FNT Protocol');
-      }
+      this.isVisionReady = true;
+      this.isVisionLoading = false;
+      console.log('✓ Google MediaPipe Tasks-Vision (Hand + Face/Nose) fully armed & active at 60 FPS!');
     } catch (err) {
-      console.warn('MediaPipe initialization waiting for script load:', err);
+      console.error('Critical MediaPipe Vision initialization error:', err);
+      this.isVisionLoading = false;
     }
   }
 
@@ -122,162 +92,70 @@ export class HighSpeedHandTracker {
       return { landmarks: null, handedness: 'Unknown', confidence: 0, engineType: 'Awaiting Video', noseLandmark: null };
     }
 
-    if ((!this.mpHands && (window as any).Hands) || (!this.mpFace && (window as any).FaceMesh)) {
-      this.initMediaPipe();
+    if (!this.isVisionReady && !this.isVisionLoading) {
+      this.initVision();
+      return { landmarks: null, handedness: 'Unknown', confidence: 0, engineType: 'Starting Vision Engine...', noseLandmark: null };
     }
 
-    if (this.mpHands && !this.isProcessing) {
+    if (!this.isVisionReady) {
+      return { landmarks: null, handedness: 'Unknown', confidence: 0, engineType: 'Loading GPU Models...', noseLandmark: null };
+    }
+
+    const now = performance.now();
+    const ts = now > this.lastTimestamp ? now : this.lastTimestamp + 1;
+    this.lastTimestamp = ts;
+
+    // 1. Detect Real 21-Joint 3D Hand Landmarks
+    if (this.handLandmarker) {
       try {
-        this.isProcessing = true;
-        this.mpHands.send({ image: video });
-      } catch (e) {
-        this.isProcessing = false;
-      }
-    }
-
-    if (this.mpFace && !this.isFaceProcessing) {
-      try {
-        this.isFaceProcessing = true;
-        this.mpFace.send({ image: video });
-      } catch (e) {
-        this.isFaceProcessing = false;
-      }
-    }
-
-    const activeNose = this.latestNose || { x: 0.50, y: 0.32, z: 0 };
-
-    if (this.latestLandmarks && this.latestLandmarks.length === 21) {
-      return {
-        landmarks: this.latestLandmarks,
-        handedness: this.latestHandedness,
-        confidence: this.latestConfidence,
-        engineType: 'Google MediaPipe GPU WASM',
-        noseLandmark: activeNose
-      };
-    }
-
-    const cvFallback = this.trackOpticalContour(video);
-    return {
-      landmarks: cvFallback,
-      handedness: 'Right',
-      confidence: cvFallback ? 0.78 : 0,
-      engineType: cvFallback ? 'Optical Kinematic Sensor' : 'Searching for Hand',
-      noseLandmark: activeNose
-    };
-  }
-
-  private trackOpticalContour(video: HTMLVideoElement): HandLandmark[] | null {
-    if (!this.offscreenCtx) return null;
-
-    const w = this.offscreenCanvas.width;
-    const h = this.offscreenCanvas.height;
-
-    this.offscreenCtx.drawImage(video, 0, 0, w, h);
-    const frame = this.offscreenCtx.getImageData(0, 0, w, h);
-    const data = frame.data;
-
-    let skinCount = 0;
-    let sumX = 0;
-    let sumY = 0;
-    let minY = h;
-    let minX = w;
-    let maxX = 0;
-    let maxY = 0;
-
-    for (let y = 10; y < h - 10; y += 2) {
-      for (let x = 10; x < w - 10; x += 2) {
-        const idx = (y * w + x) * 4;
-        const r = data[idx];
-        const g = data[idx + 1];
-        const b = data[idx + 2];
-
-        const isSkin =
-          r > 95 && g > 40 && b > 20 &&
-          r > g && r > b &&
-          Math.abs(r - g) > 15 &&
-          r - g > 15;
-
-        if (isSkin) {
-          skinCount++;
-          sumX += x;
-          sumY += y;
-          if (y < minY) minY = y;
-          if (y > maxY) maxY = y;
-          if (x < minX) minX = x;
-          if (x > maxX) maxX = x;
+        const handResult = this.handLandmarker.detectForVideo(video, ts);
+        if (handResult.landmarks && handResult.landmarks.length > 0) {
+          const raw = handResult.landmarks[0];
+          this.latestLandmarks = raw.map(pt => ({
+            x: pt.x,
+            y: pt.y,
+            z: pt.z || 0
+          }));
+          const handednessInfo = handResult.handednesses && handResult.handednesses[0] && handResult.handednesses[0][0];
+          this.latestHandedness = (handednessInfo?.displayName as any) || 'Right';
+          this.latestConfidence = handednessInfo?.score || 0.95;
+        } else {
+          this.latestLandmarks = null;
         }
+      } catch (e) {
+        // Drop corrupted frame safely
       }
     }
 
-    if (skinCount < 300) {
-      return null;
+    // 2. Detect 3D Face / Nose Tip (Landmark 1 = Anatomical Nose Tip, Landmark 4 = Nose Bridge)
+    if (this.faceLandmarker) {
+      try {
+        const faceResult = this.faceLandmarker.detectForVideo(video, ts);
+        if (faceResult.faceLandmarks && faceResult.faceLandmarks.length > 0) {
+          const face = faceResult.faceLandmarks[0];
+          const nosePt = face[1] || face[4];
+          if (nosePt) {
+            this.latestNose = {
+              x: nosePt.x,
+              y: nosePt.y,
+              z: nosePt.z || 0
+            };
+          }
+        } else {
+          this.latestNose = null;
+        }
+      } catch (e) {
+        // Drop corrupted frame safely
+      }
     }
 
-    const palmX = (sumX / skinCount) / w;
-    const palmY = (sumY / skinCount) / h;
-    const wristX = palmX;
-    const wristY = Math.min(1.0, (maxY / h) + 0.05);
-
-    const indexApexX = Math.max(0.05, Math.min(0.95, (minX + (maxX - minX) * 0.45) / w));
-    const indexApexY = Math.max(0.05, Math.min(0.95, minY / h));
-
-    const thumbApexX = Math.max(0.05, Math.min(0.95, (minX / w) + 0.02));
-    const thumbApexY = Math.max(0.05, Math.min(0.95, (minY / h) + (maxY - minY) / (h * 2.8)));
-
-    const landmarks: HandLandmark[] = [];
-    landmarks.push({ x: wristX, y: wristY, z: 0 });
-
-    for (let i = 1; i <= 4; i++) {
-      const t = i / 4;
-      landmarks.push({
-        x: wristX + (thumbApexX - wristX) * t,
-        y: wristY + (thumbApexY - wristY) * t,
-        z: -0.02 * i
-      });
-    }
-
-    const indexBaseX = palmX - 0.04;
-    const indexBaseY = palmY - 0.08;
-    for (let i = 1; i <= 4; i++) {
-      const t = i / 4;
-      landmarks.push({
-        x: indexBaseX + (indexApexX - indexBaseX) * t,
-        y: indexBaseY + (indexApexY - indexBaseY) * t,
-        z: -0.03 * i
-      });
-    }
-
-    const middleApexX = (minX + maxX) / (w * 2);
-    for (let i = 1; i <= 4; i++) {
-      const t = i / 4;
-      landmarks.push({
-        x: palmX + (middleApexX - palmX) * t,
-        y: palmY + (indexApexY + 0.01 - palmY) * t,
-        z: -0.025 * i
-      });
-    }
-
-    const ringApexX = maxX / w - 0.06;
-    for (let i = 1; i <= 4; i++) {
-      const t = i / 4;
-      landmarks.push({
-        x: palmX + 0.04 + (ringApexX - (palmX + 0.04)) * t,
-        y: palmY + (indexApexY + 0.04 - palmY) * t,
-        z: -0.02 * i
-      });
-    }
-
-    const pinkyApexX = maxX / w - 0.02;
-    for (let i = 1; i <= 4; i++) {
-      const t = i / 4;
-      landmarks.push({
-        x: palmX + 0.07 + (pinkyApexX - (palmX + 0.07)) * t,
-        y: palmY + 0.02 + (indexApexY + 0.08 - palmY) * t,
-        z: -0.015 * i
-      });
-    }
-
-    return landmarks;
+    return {
+      landmarks: this.latestLandmarks,
+      handedness: this.latestHandedness,
+      confidence: this.latestConfidence,
+      engineType: this.latestLandmarks ? 'Google MediaPipe GPU WASM' : 'Searching for Hand',
+      noseLandmark: this.latestNose
+    };
   }
 
   /**

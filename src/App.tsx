@@ -189,17 +189,23 @@ export const App: React.FC = () => {
         );
 
         // 3. Update Raw Real-Time Coordinates for Live Inspector
+        if (trackResult.noseLandmark) {
+          const nose = trackResult.noseLandmark;
+          setRawCoordinates(prev => ({
+            ...prev,
+            noseTip: { x: Math.round(nose.x * 1000) / 1000, y: Math.round(nose.y * 1000) / 1000, z: Math.round((nose.z || 0) * 1000) / 1000 }
+          }));
+        }
+
         if (trackResult.landmarks && trackResult.landmarks.length >= 21) {
           const t = trackResult.landmarks[4];
           const idx = trackResult.landmarks[8];
           const w = trackResult.landmarks[0];
-          const nose = trackResult.noseLandmark || { x: 0.5, y: 0.32, z: 0 };
           setRawCoordinates(prev => ({
             ...prev,
             thumbTip: { x: Math.round(t.x * 1000) / 1000, y: Math.round(t.y * 1000) / 1000, z: Math.round((t.z || 0) * 1000) / 1000 },
             indexTip: { x: Math.round(idx.x * 1000) / 1000, y: Math.round(idx.y * 1000) / 1000, z: Math.round((idx.z || 0) * 1000) / 1000 },
-            wrist: { x: Math.round(w.x * 1000) / 1000, y: Math.round(w.y * 1000) / 1000, z: Math.round((w.z || 0) * 1000) / 1000 },
-            noseTip: { x: Math.round(nose.x * 1000) / 1000, y: Math.round(nose.y * 1000) / 1000, z: Math.round((nose.z || 0) * 1000) / 1000 }
+            wrist: { x: Math.round(w.x * 1000) / 1000, y: Math.round(w.y * 1000) / 1000, z: Math.round((w.z || 0) * 1000) / 1000 }
           }));
         }
 
