@@ -113,6 +113,30 @@ export const JudgeDefenseModal: React.FC<JudgeDefenseModalProps> = ({ isOpen, on
             </p>
           </div>
 
+          {/* Question 5: Finger-to-Nose (FNT) Protocol Innovation */}
+          <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '1.25rem' }}>
+            <span style={{ fontSize: '0.72rem', fontWeight: 800, color: '#15803d', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Core Viva Defense #5 (Clinical Innovation)
+            </span>
+            <h3 style={{ fontSize: '1rem', fontWeight: 900, color: '#14532d', margin: '0.25rem 0 0.5rem 0' }}>
+              Judge: "Why track the patient's nose? What does the Finger-to-Nose Test (FNT) prove?"
+            </h3>
+            <p style={{ margin: '0 0 0.5rem 0', color: '#166534' }}>
+              <strong>Your Master Response:</strong> *"Sir, in clinical neurology, dysmetria and intention tremor cannot be diagnosed by evaluating hand coordinates in isolation:"*
+            </p>
+            <ul style={{ margin: 0, paddingLeft: '1.25rem', color: '#166534', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+              <li>
+                <strong>Anatomical Ground Truth</strong>: Dysmetria is defined as an error in trajectory distance relative to the patient's own cranial midline. By tracking the nasal tip (MediaPipe Landmark 1) simultaneously with the index finger (J8), we establish a true dual-anchor reference frame.
+              </li>
+              <li>
+                <strong>Terminal Braking Deceleration</strong>: The cerebellum's purkinje cell circuit computes motor braking. In ataxic patients, the finger accelerates normally at first but fails to decelerate, causing past-pointing hypermetria (overshooting the nose into facial space).
+              </li>
+              <li>
+                <strong>Path Tortuosity / Curvature Index (κ)</strong>: Healthy motor transit follows a geodesic arc (κ ≈ 1.05–1.12). Cerebellar decomposition of movement (asynergia) breaks the arc into fragmented, multi-axis segments with κ &gt; 1.35.
+              </li>
+            </ul>
+          </div>
+
           {/* Mathematical Equations Card */}
           <div style={{ background: '#0f172a', color: '#ffffff', borderRadius: '8px', padding: '1.25rem' }}>
             <span style={{ fontSize: '0.72rem', fontWeight: 800, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
@@ -134,6 +158,14 @@ export const JudgeDefenseModal: React.FC<JudgeDefenseModalProps> = ({ isOpen, on
               <div>
                 <span style={{ color: '#94a3b8' }}>4. Joint Goniometer Flexion:</span>
                 <p style={{ color: '#c084fc', margin: '0.2rem 0' }}>θ = arccos[(u·v) / (||u||·||v||)] · (180/π)</p>
+              </div>
+              <div>
+                <span style={{ color: '#94a3b8' }}>5. Path Curvature Index (κ):</span>
+                <p style={{ color: '#38bdf8', margin: '0.2rem 0' }}>κ = L_actual / L_euclidean (κ &gt; 1.35 = Ataxia)</p>
+              </div>
+              <div>
+                <span style={{ color: '#94a3b8' }}>6. Terminal Intention Tremor:</span>
+                <p style={{ color: '#f87171', margin: '0.2rem 0' }}>σ² = (1/K) Σ ||p_i - μ_target||² (d &lt; 45mm)</p>
               </div>
             </div>
           </div>

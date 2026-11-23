@@ -67,7 +67,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
             onClick={() => onSelectProtocol('task-3-12')}
             style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', padding: '0.35rem 0.75rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 700, border: 'none', cursor: 'pointer', background: activeProtocol === 'task-3-12' ? '#0284c7' : 'transparent', color: activeProtocol === 'task-3-12' ? '#ffffff' : '#475569', transition: 'all 0.15s ease' }}
           >
-            <Target size={12} /> Task 3.12: Kinetic Target Reaching
+            <Target size={12} /> Task 3.12: Finger-to-Nose (FNT)
           </button>
           <button
             onClick={() => onSelectProtocol('task-3-15')}

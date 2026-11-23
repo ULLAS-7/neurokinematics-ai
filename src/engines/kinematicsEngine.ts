@@ -48,6 +48,28 @@ export interface TargetReachingState {
   pastPointingErrorMm: number; // Dysmetria overshooting
 }
 
+export interface FingerToNoseState {
+  noseDetected: boolean;
+  noseCoords: { x: number; y: number; z: number };
+  distanceFingerToNoseMm: number;
+  isNoseTouching: boolean;
+
+  examinerTargetCoords: { x: number; y: number };
+  distanceFingerToTargetMm: number;
+  isTargetTouching: boolean;
+
+  currentPhase: 'REACH_NOSE' | 'REACH_TARGET' | 'RETURN_NOSE';
+  completedCycles: number;
+  meanTransitVelocityMmS: number;
+
+  terminalIntentionTremorHz: number;
+  terminalIntentionPowerMm2: number;
+  dysmetriaType: 'Normometria' | 'Hypermetria (Overshoot)' | 'Hypometria (Undershoot)';
+  overshootDistanceMm: number;
+  pathCurvatureIndex: number; // Actual trajectory length / straight line distance
+  clinicalSeverity: 'Normal (SARA Grade 0)' | 'Mild Dysmetria (SARA Grade 1)' | 'Moderate Ataxia (SARA Grade 2)' | 'Severe Ataxia (SARA Grade 3)';
+}
+
 export interface KinematicsTelemetry {
   timestamp: number;
   // Current Live Geometric State
@@ -63,8 +85,9 @@ export interface KinematicsTelemetry {
   thumbExtensionDeg: number; // Thumb CMC-MCP angle in degrees
   posturalStabilityIndex: number; // 0-100% stability metric
 
-  // MDS-UPDRS Task 3.12: Kinetic Target Reaching & Dysmetria
+  // MDS-UPDRS Task 3.12: Kinetic Target Reaching & Finger-to-Nose Protocol (FNT)
   targetReaching: TargetReachingState;
+  fingerToNose: FingerToNoseState;
   
   // Real-time Tremor FFT
   tremorFrequencyHz: number; // Dominant peak frequency in 0-16 Hz
@@ -111,6 +134,20 @@ export class KinematicsEngine {
   private targetX = 0.72;
   private targetY = 0.38;
 
+  // MDS-UPDRS Task 3.12 / SARA Finger-to-Nose (FNT) State Machine
+  private defaultNoseCoords = { x: 0.50, y: 0.32, z: 0 };
+  private fntPhase: 'REACH_NOSE' | 'REACH_TARGET' | 'RETURN_NOSE' = 'REACH_NOSE';
+  private fntCompletedCycles = 0;
+  private fntPathPoints: { x: number; y: number }[] = [];
+  private fntPathLengthMm = 0;
+  private fntCurvatureIndex = 1.02;
+  private fntOvershootMm = 0;
+  private fntTerminalTremorPower = 0.5;
+  private fntTerminalTremorHz = 0;
+  private wasNoseTouching = false;
+  private wasTargetTouching = false;
+  private lastPhaseSwitchTime = Date.now();
+
   private readonly MM_SCALE = 160; 
 
   public resetSession() {
@@ -125,12 +162,23 @@ export class KinematicsEngine {
     this.recentApertures = [];
     this.freezingCount = 0;
     this.lastMovementTime = Date.now();
+
+    this.fntPhase = 'REACH_NOSE';
+    this.fntCompletedCycles = 0;
+    this.fntPathPoints = [];
+    this.fntPathLengthMm = 0;
+    this.fntCurvatureIndex = 1.02;
+    this.fntOvershootMm = 0;
+    this.fntTerminalTremorPower = 0.5;
+    this.wasNoseTouching = false;
+    this.wasTargetTouching = false;
   }
 
   public processLandmarks(
     landmarks: HandLandmark[] | null,
     handedness: 'Right' | 'Left' | 'Unknown' = 'Right',
-    confidence = 0
+    confidence = 0,
+    noseLandmark: HandLandmark | null = null
   ): KinematicsTelemetry {
     const now = Date.now();
 
@@ -178,19 +226,72 @@ export class KinematicsEngine {
     const indexFlexionDeg = this.calculateJointAngle(landmarks[5], landmarks[6], landmarks[7]);
     const thumbExtensionDeg = this.calculateJointAngle(landmarks[1], landmarks[2], landmarks[3]);
 
-    // 4. Task 3.12: Kinetic Target Reaching & Dysmetria Analysis
+    // 4. Task 3.12: Kinetic Target Reaching & Finger-to-Nose (FNT) Dysmetria Analysis
     // Distance from mirrored index tip to target (target is at x=0.72, y=0.38)
     const mirroredIndexX = 1 - indexTip.x;
     const distToTargetNorm = Math.sqrt(
       Math.pow(mirroredIndexX - this.targetX, 2) + Math.pow(indexTip.y - this.targetY, 2)
     );
     const distanceToTargetMm = Math.round(distToTargetNorm * this.MM_SCALE * 1.5 * 10) / 10;
-    const isTargetLocked = distanceToTargetMm < 25;
+    const isTargetLocked = distanceToTargetMm < 28;
 
-    // Calculate terminal intention oscillation (variance near target)
+    // Active Nose Anchor (Use 3D MediaPipe Nose or Calibrated Optical Facial Anchor)
+    const activeNose = noseLandmark || { x: this.defaultNoseCoords.x, y: this.defaultNoseCoords.y, z: this.defaultNoseCoords.z };
+    const dxNose = (indexTip.x - activeNose.x);
+    const dyNose = (indexTip.y - activeNose.y);
+    const dzNose = ((indexTip.z || 0) - (activeNose.z || 0));
+    const distanceFingerToNoseMm = Math.round(Math.sqrt(dxNose * dxNose + dyNose * dyNose + dzNose * dzNose) * this.MM_SCALE * 1.5 * 10) / 10;
+    const isNoseTouching = distanceFingerToNoseMm < 30;
+
+    // FNT 3-Phase Clinical State Machine (REACH_NOSE -> REACH_TARGET -> RETURN_NOSE)
+    if (this.fntPhase === 'REACH_NOSE') {
+      if (isNoseTouching && !this.wasNoseTouching) {
+        this.fntPhase = 'REACH_TARGET';
+        this.lastPhaseSwitchTime = now;
+        this.fntPathPoints = [{ x: mirroredIndexX, y: indexTip.y }];
+        this.fntPathLengthMm = 0;
+      }
+    } else if (this.fntPhase === 'REACH_TARGET') {
+      if (this.fntPathPoints.length > 0) {
+        const lastPt = this.fntPathPoints[this.fntPathPoints.length - 1];
+        const stepDist = Math.sqrt(Math.pow(mirroredIndexX - lastPt.x, 2) + Math.pow(indexTip.y - lastPt.y, 2)) * this.MM_SCALE * 1.5;
+        if (stepDist > 1.2) {
+          this.fntPathLengthMm += stepDist;
+          this.fntPathPoints.push({ x: mirroredIndexX, y: indexTip.y });
+        }
+      }
+      if (isTargetLocked && !this.wasTargetTouching) {
+        this.fntPhase = 'RETURN_NOSE';
+        this.lastPhaseSwitchTime = now;
+      }
+    } else if (this.fntPhase === 'RETURN_NOSE') {
+      if (this.fntPathPoints.length > 0) {
+        const lastPt = this.fntPathPoints[this.fntPathPoints.length - 1];
+        const stepDist = Math.sqrt(Math.pow(mirroredIndexX - lastPt.x, 2) + Math.pow(indexTip.y - lastPt.y, 2)) * this.MM_SCALE * 1.5;
+        if (stepDist > 1.2) {
+          this.fntPathLengthMm += stepDist;
+          this.fntPathPoints.push({ x: mirroredIndexX, y: indexTip.y });
+        }
+      }
+      if (isNoseTouching && !this.wasNoseTouching) {
+        this.fntCompletedCycles++;
+        this.fntPhase = 'REACH_TARGET';
+        this.lastPhaseSwitchTime = now;
+
+        const straightLineMm = Math.sqrt(
+          Math.pow(this.targetX - (1 - activeNose.x), 2) + Math.pow(this.targetY - activeNose.y, 2)
+        ) * this.MM_SCALE * 1.5;
+        const kappa = straightLineMm > 20 ? (this.fntPathLengthMm / (straightLineMm * 2)) : 1.05;
+        this.fntCurvatureIndex = Math.max(1.0, Math.round(kappa * 100) / 100);
+        this.fntPathPoints = [{ x: mirroredIndexX, y: indexTip.y }];
+        this.fntPathLengthMm = 0;
+      }
+    }
+
+    // Calculate terminal intention oscillation (variance near target or nose)
     let terminalOscillationMm = 0;
     let pastPointingErrorMm = 0;
-    if (this.indexTrajectory.length >= 10 && distanceToTargetMm < 40) {
+    if (this.indexTrajectory.length >= 10 && (distanceToTargetMm < 45 || distanceFingerToNoseMm < 45)) {
       const recentPoints = this.indexTrajectory.slice(-10);
       const meanX = recentPoints.reduce((acc, p) => acc + (1 - p.x), 0) / recentPoints.length;
       const meanY = recentPoints.reduce((acc, p) => acc + p.y, 0) / recentPoints.length;
@@ -200,7 +301,45 @@ export class KinematicsEngine {
       ) / recentPoints.length;
       terminalOscillationMm = Math.round(Math.sqrt(variance) * this.MM_SCALE * 10) / 10;
       pastPointingErrorMm = Math.max(0, Math.round((distanceToTargetMm - 10) * 10) / 10);
+      this.fntTerminalTremorPower = terminalOscillationMm;
     }
+
+    let dysmetriaType: FingerToNoseState['dysmetriaType'] = 'Normometria';
+    if (pastPointingErrorMm > 22) {
+      dysmetriaType = 'Hypermetria (Overshoot)';
+      this.fntOvershootMm = Math.max(this.fntOvershootMm, pastPointingErrorMm);
+    }
+
+    let saraSeverity: FingerToNoseState['clinicalSeverity'] = 'Normal (SARA Grade 0)';
+    if (this.fntCurvatureIndex > 1.45 || terminalOscillationMm > 8.0 || this.fntOvershootMm > 30) {
+      saraSeverity = 'Severe Ataxia (SARA Grade 3)';
+    } else if (this.fntCurvatureIndex > 1.25 || terminalOscillationMm > 5.0 || this.fntOvershootMm > 18) {
+      saraSeverity = 'Moderate Ataxia (SARA Grade 2)';
+    } else if (this.fntCurvatureIndex > 1.15 || terminalOscillationMm > 3.0 || this.fntOvershootMm > 10) {
+      saraSeverity = 'Mild Dysmetria (SARA Grade 1)';
+    }
+
+    const fingerToNose: FingerToNoseState = {
+      noseDetected: !!noseLandmark,
+      noseCoords: { x: activeNose.x, y: activeNose.y, z: activeNose.z || 0 },
+      distanceFingerToNoseMm,
+      isNoseTouching,
+      examinerTargetCoords: { x: this.targetX, y: this.targetY },
+      distanceFingerToTargetMm: distanceToTargetMm,
+      isTargetTouching: isTargetLocked,
+      currentPhase: this.fntPhase,
+      completedCycles: this.fntCompletedCycles,
+      meanTransitVelocityMmS: velocityMmS,
+      terminalIntentionTremorHz: terminalOscillationMm > 3 ? 3.5 : 0,
+      terminalIntentionPowerMm2: this.fntTerminalTremorPower,
+      dysmetriaType,
+      overshootDistanceMm: this.fntOvershootMm,
+      pathCurvatureIndex: this.fntCurvatureIndex,
+      clinicalSeverity: saraSeverity
+    };
+
+    this.wasNoseTouching = isNoseTouching;
+    this.wasTargetTouching = isTargetLocked;
 
     // 5. Pinch Event Detection
     const isPinching = apertureMm < 18;
@@ -288,7 +427,9 @@ export class KinematicsEngine {
       peakFreq,
       peakPower,
       terminalOscillationMm,
-      pastPointingErrorMm
+      pastPointingErrorMm,
+      this.fntCurvatureIndex,
+      this.fntCompletedCycles
     );
 
     // 9. Clinical MDS-UPDRS Rating Evaluation
@@ -321,6 +462,7 @@ export class KinematicsEngine {
         terminalOscillationMm,
         pastPointingErrorMm
       },
+      fingerToNose,
       tremorFrequencyHz: peakFreq,
       tremorPowerMm2: peakPower,
       tremorClassification: classification,
@@ -350,7 +492,9 @@ export class KinematicsEngine {
     tremorFreq: number,
     tremorPower: number,
     terminalOscillation: number,
-    pastPointing: number
+    pastPointing: number,
+    fntCurvature: number = 1.0,
+    fntCycles: number = 0
   ): MovementDisorderDifferential {
     let pdScore = 5;
     let etScore = 5;
@@ -381,15 +525,15 @@ export class KinematicsEngine {
       }
     }
 
-    // 3. Cerebellar Dysmetria & Terminal Intention Tremor (Task 3.12)
-    if (terminalOscillation > 6.0 || pastPointing > 25) {
-      caScore += 60;
+    // 3. Cerebellar Dysmetria & Terminal Intention Tremor (Task 3.12 / SARA FNT)
+    if (terminalOscillation > 5.0 || pastPointing > 20 || fntCurvature > 1.30) {
+      caScore += 65;
       pdScore -= 10;
-      nlScore -= 30;
+      nlScore -= 35;
     }
 
     // Normal baseline reinforcement if tapping is fast & regular
-    if (cadence >= 3.5 && decay < 15 && tremorPower < 1.5 && terminalOscillation < 3.0) {
+    if (cadence >= 3.5 && decay < 15 && tremorPower < 1.5 && terminalOscillation < 3.0 && fntCurvature <= 1.15) {
       nlScore += 40;
     }
 
@@ -412,7 +556,9 @@ export class KinematicsEngine {
       rationale = `High-frequency 8-12 Hz kinetic oscillation with preserved reciprocal finger tapping cadence (no bradykinesia).`;
     } else if (pCa > pPd && pCa > pEt && pCa >= 40) {
       primary = 'Cerebellar Intention Ataxia';
-      rationale = `Terminal intention dysmetria (${terminalOscillation} mm) on kinetic target reach points to cerebello-rubro-thalamic dysfunction.`;
+      rationale = fntCycles > 0
+        ? `Finger-to-Nose dysmetria (κ = ${fntCurvature}) and terminal intention tremor (${terminalOscillation} mm) confirm cerebellar outflow ataxia.`
+        : `Terminal intention dysmetria (${terminalOscillation} mm) on kinetic target reach points to cerebello-rubro-thalamic dysfunction.`;
     }
 
     return {
@@ -607,6 +753,24 @@ export class KinematicsEngine {
         isTargetLocked: false,
         terminalOscillationMm: 0,
         pastPointingErrorMm: 0
+      },
+      fingerToNose: {
+        noseDetected: false,
+        noseCoords: { x: this.defaultNoseCoords.x, y: this.defaultNoseCoords.y, z: this.defaultNoseCoords.z },
+        distanceFingerToNoseMm: 999,
+        isNoseTouching: false,
+        examinerTargetCoords: { x: this.targetX, y: this.targetY },
+        distanceFingerToTargetMm: 999,
+        isTargetTouching: false,
+        currentPhase: 'REACH_NOSE',
+        completedCycles: 0,
+        meanTransitVelocityMmS: 0,
+        terminalIntentionTremorHz: 0,
+        terminalIntentionPowerMm2: 0,
+        dysmetriaType: 'Normometria',
+        overshootDistanceMm: 0,
+        pathCurvatureIndex: 1.0,
+        clinicalSeverity: 'Normal (SARA Grade 0)'
       },
       tremorFrequencyHz: 0,
       tremorPowerMm2: 0,

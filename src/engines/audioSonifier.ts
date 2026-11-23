@@ -100,6 +100,121 @@ class ClinicalAudioSonifier {
       osc.stop(now + 0.04);
     } catch (e) {}
   }
+
+  /**
+   * Finger-to-Nose Test (FNT): Distinctive High-Resonant Bell when touching nose
+   */
+  public playNoseContact() {
+    const ctx = this.getContext();
+    if (!ctx) return;
+
+    try {
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1046.5, now); // C6 bell chime
+      osc.frequency.exponentialRampToValueAtTime(1318.5, now + 0.08); // Glide to E6
+
+      gain.gain.setValueAtTime(0.15, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(now);
+      osc.stop(now + 0.12);
+    } catch (e) {}
+  }
+
+  /**
+   * Finger-to-Nose Test (FNT): Harmonic Target Lock Chime
+   */
+  public playTargetLock() {
+    const ctx = this.getContext();
+    if (!ctx) return;
+
+    try {
+      const now = ctx.currentTime;
+      const osc1 = ctx.createOscillator();
+      const osc2 = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(659.25, now); // E5
+
+      osc2.type = 'triangle';
+      osc2.frequency.setValueAtTime(880, now); // A5
+
+      gain.gain.setValueAtTime(0.12, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+
+      osc1.connect(gain);
+      osc2.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc1.start(now);
+      osc2.start(now);
+      osc1.stop(now + 0.15);
+      osc2.stop(now + 0.15);
+    } catch (e) {}
+  }
+
+  /**
+   * Finger-to-Nose Test (FNT): Ascending 3-note Victory Chime for completed cycle
+   */
+  public playCycleSuccess() {
+    const ctx = this.getContext();
+    if (!ctx) return;
+
+    try {
+      const notes = [523.25, 659.25, 783.99]; // C5, E5, G5 major triad
+      notes.forEach((freq, idx) => {
+        const start = ctx.currentTime + idx * 0.08;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, start);
+
+        gain.gain.setValueAtTime(0.14, start);
+        gain.gain.exponentialRampToValueAtTime(0.001, start + 0.14);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc.start(start);
+        osc.stop(start + 0.14);
+      });
+    } catch (e) {}
+  }
+
+  /**
+   * Finger-to-Nose Test (FNT): Cautionary Dysmetria Warning Buzzer
+   */
+  public playDysmetriaWarning() {
+    const ctx = this.getContext();
+    if (!ctx) return;
+
+    try {
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(220, now); // A3 low alert
+
+      gain.gain.setValueAtTime(0.08, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(now);
+      osc.stop(now + 0.2);
+    } catch (e) {}
+  }
 }
 
 export const audioSonifier = new ClinicalAudioSonifier();

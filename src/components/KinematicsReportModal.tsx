@@ -170,6 +170,16 @@ export const KinematicsReportModal: React.FC<KinematicsReportModalProps> = ({
                   {telemetry.tremorClassification}
                 </td>
               </tr>
+              <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
+                <td style={{ padding: '0.6rem 0.75rem', fontWeight: 600 }}>Finger-to-Nose (FNT) Path Curvature (κ)</td>
+                <td style={{ padding: '0.6rem 0.75rem', fontWeight: 800, fontFamily: 'monospace' }}>
+                  κ = {telemetry.fingerToNose.pathCurvatureIndex.toFixed(2)} ({telemetry.fingerToNose.completedCycles} cycles)
+                </td>
+                <td style={{ padding: '0.6rem 0.75rem', color: '#64748b' }}>κ &le; 1.15 (Geodesic coordination)</td>
+                <td style={{ padding: '0.6rem 0.75rem', color: telemetry.fingerToNose.pathCurvatureIndex <= 1.15 ? '#16a34a' : '#dc2626', fontWeight: 700 }}>
+                  {telemetry.fingerToNose.clinicalSeverity}
+                </td>
+              </tr>
               <tr>
                 <td style={{ padding: '0.6rem 0.75rem', fontWeight: 600 }}>Motor Blocks / Freezing Pauses</td>
                 <td style={{ padding: '0.6rem 0.75rem', fontWeight: 800, fontFamily: 'monospace' }}>{telemetry.freezingArrestsCount} arrests</td>

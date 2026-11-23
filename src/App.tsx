@@ -30,11 +30,13 @@ export const App: React.FC = () => {
     thumbTip: { x: number; y: number; z: number };
     indexTip: { x: number; y: number; z: number };
     wrist: { x: number; y: number; z: number };
+    noseTip: { x: number; y: number; z: number };
     fps: number;
   }>({
     thumbTip: { x: 0, y: 0, z: 0 },
     indexTip: { x: 0, y: 0, z: 0 },
     wrist: { x: 0, y: 0, z: 0 },
+    noseTip: { x: 0.5, y: 0.32, z: 0 },
     fps: 60
   });
 
@@ -145,6 +147,8 @@ export const App: React.FC = () => {
 
     let wasPreviouslyPinching = false;
     let wasTargetPreviouslyLocked = false;
+    let wasNosePreviouslyTouching = false;
+    let previousCycles = 0;
 
     const renderLoop = () => {
       const video = videoRef.current;
@@ -172,15 +176,16 @@ export const App: React.FC = () => {
 
         const overlayCtx = overlayCanvas.getContext('2d');
 
-        // 1. Live Optical / MediaPipe Hand Landmark Detection
+        // 1. Live Optical / MediaPipe Hand & Face Tracking
         const trackResult = tracker.trackHand(video);
         setEngineType(trackResult.engineType);
 
-        // 2. Process Real Kinematics with Biomechanical Goniometry & Target Protocol
+        // 2. Process Real Kinematics with Biomechanical Goniometry & Finger-to-Nose Protocol
         const telemetryResult = engine.processLandmarks(
           trackResult.landmarks,
           trackResult.handedness,
-          trackResult.confidence
+          trackResult.confidence,
+          trackResult.noseLandmark
         );
 
         // 3. Update Raw Real-Time Coordinates for Live Inspector
@@ -188,28 +193,46 @@ export const App: React.FC = () => {
           const t = trackResult.landmarks[4];
           const idx = trackResult.landmarks[8];
           const w = trackResult.landmarks[0];
+          const nose = trackResult.noseLandmark || { x: 0.5, y: 0.32, z: 0 };
           setRawCoordinates(prev => ({
             ...prev,
             thumbTip: { x: Math.round(t.x * 1000) / 1000, y: Math.round(t.y * 1000) / 1000, z: Math.round((t.z || 0) * 1000) / 1000 },
             indexTip: { x: Math.round(idx.x * 1000) / 1000, y: Math.round(idx.y * 1000) / 1000, z: Math.round((idx.z || 0) * 1000) / 1000 },
-            wrist: { x: Math.round(w.x * 1000) / 1000, y: Math.round(w.y * 1000) / 1000, z: Math.round((w.z || 0) * 1000) / 1000 }
+            wrist: { x: Math.round(w.x * 1000) / 1000, y: Math.round(w.y * 1000) / 1000, z: Math.round((w.z || 0) * 1000) / 1000 },
+            noseTip: { x: Math.round(nose.x * 1000) / 1000, y: Math.round(nose.y * 1000) / 1000, z: Math.round((nose.z || 0) * 1000) / 1000 }
           }));
         }
 
-        // 4. Acoustic Sonification on Pinch Contact or Target Lock
+        // 4. Acoustic Sonification on Pinch Contact, Nose Touch, Target Lock or Completed Cycle
         if (!wasPreviouslyPinching && telemetryResult.isPinching) {
           audioSonifier.playPinchClick();
         }
-        if (activeProtocol === 'task-3-12' && !wasTargetPreviouslyLocked && telemetryResult.targetReaching.isTargetLocked) {
-          audioSonifier.playMetronomeTick(true);
+        if (activeProtocol === 'task-3-12') {
+          if (!wasNosePreviouslyTouching && telemetryResult.fingerToNose.isNoseTouching) {
+            audioSonifier.playNoseContact();
+          }
+          if (!wasTargetPreviouslyLocked && telemetryResult.fingerToNose.isTargetTouching) {
+            audioSonifier.playTargetLock();
+          }
+          if (telemetryResult.fingerToNose.completedCycles > previousCycles) {
+            audioSonifier.playCycleSuccess();
+            previousCycles = telemetryResult.fingerToNose.completedCycles;
+          }
+          wasNosePreviouslyTouching = telemetryResult.fingerToNose.isNoseTouching;
+          wasTargetPreviouslyLocked = telemetryResult.fingerToNose.isTargetTouching;
+        } else {
+          if (!wasTargetPreviouslyLocked && telemetryResult.targetReaching.isTargetLocked) {
+            audioSonifier.playMetronomeTick(true);
+          }
+          wasTargetPreviouslyLocked = telemetryResult.targetReaching.isTargetLocked;
         }
+
         if (telemetryResult.clinicalAlert && !wasPreviouslyPinching && telemetryResult.isPinching) {
           audioSonifier.playWarningAlert();
         }
         wasPreviouslyPinching = telemetryResult.isPinching;
-        wasTargetPreviouslyLocked = telemetryResult.targetReaching.isTargetLocked;
 
-        // 5. Render Glowing 3D Biometric Skeleton & Target Reticle
+        // 5. Render Glowing 3D Biometric Skeleton & Dual Reticle Overlay
         if (overlayCtx) {
           tracker.renderOverlay(
             overlayCtx,
@@ -221,7 +244,8 @@ export const App: React.FC = () => {
             telemetryResult.isPinching,
             telemetryResult.indexFlexionDeg,
             telemetryResult.targetReaching,
-            activeProtocol === 'task-3-12'
+            activeProtocol === 'task-3-12',
+            telemetryResult.fingerToNose
           );
         }
 
@@ -414,6 +438,12 @@ export const App: React.FC = () => {
                   <span style={{ color: '#94a3b8' }}>Wrist(J0):</span>
                   <span>{rawCoordinates.wrist.x.toFixed(3)}, {rawCoordinates.wrist.y.toFixed(3)}</span>
                 </div>
+                {activeProtocol === 'task-3-12' && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#38bdf8' }}>
+                    <span style={{ fontWeight: 700 }}>Nose(N0):</span>
+                    <span>{rawCoordinates.noseTip.x.toFixed(3)}, {rawCoordinates.noseTip.y.toFixed(3)}</span>
+                  </div>
+                )}
                 <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '0.25rem', marginTop: '0.15rem', display: 'flex', justifyContent: 'space-between', fontWeight: 800, color: telemetry?.isPinching ? '#10b981' : '#ffffff' }}>
                   <span>Pinch Aperture:</span>
                   <span>{telemetry ? `${telemetry.pinchApertureMm} mm` : '0 mm'}</span>
@@ -507,49 +537,93 @@ export const App: React.FC = () => {
               />
             </div>
 
-            {/* 4. BOTTOM-RIGHT HUD: REAL-TIME WELCH'S FFT TREMOR POWER SPECTRUM */}
-            <div style={{ position: 'absolute', bottom: '0.75rem', right: '0.75rem', background: 'rgba(15, 23, 42, 0.88)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: '8px', padding: '0.65rem 0.85rem', width: '300px', pointerEvents: 'none', zIndex: 20, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.3rem' }}>
-                <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  Tremor FFT Spectrum (0–16 Hz)
-                </span>
-                <span style={{ fontSize: '0.65rem', fontWeight: 800, color: telemetry && telemetry.tremorClassification === 'Parkinsonian Resting Tremor' ? '#f87171' : '#34d399' }}>
-                  {telemetry ? telemetry.tremorClassification : 'Baseline'}
-                </span>
+            {/* 4. BOTTOM-RIGHT HUD: FNT CEREBELLAR TELEMETRY OR REAL-TIME WELCH'S FFT TREMOR POWER SPECTRUM */}
+            {activeProtocol === 'task-3-12' ? (
+              <div style={{ position: 'absolute', bottom: '0.75rem', right: '0.75rem', background: 'rgba(15, 23, 42, 0.92)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: '8px', padding: '0.65rem 0.85rem', width: '310px', pointerEvents: 'none', zIndex: 20, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '0.25rem' }}>
+                  <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    FNT Cerebellar Telemetry
+                  </span>
+                  <span style={{ fontSize: '0.64rem', fontWeight: 800, color: telemetry?.fingerToNose.clinicalSeverity.includes('Normal') ? '#34d399' : '#fbbf24' }}>
+                    {telemetry ? telemetry.fingerToNose.clinicalSeverity : 'Calibrating'}
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.22rem', fontSize: '0.67rem', fontFamily: 'JetBrains Mono, monospace' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: '#94a3b8' }}>Cycles Completed:</span>
+                    <span style={{ color: '#38bdf8', fontWeight: 800 }}>{telemetry?.fingerToNose.completedCycles || 0} / 5</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: '#94a3b8' }}>Path Curvature (κ):</span>
+                    <span style={{ color: (telemetry?.fingerToNose.pathCurvatureIndex || 1) > 1.25 ? '#fbbf24' : '#10b981', fontWeight: 800 }}>
+                      {telemetry ? telemetry.fingerToNose.pathCurvatureIndex.toFixed(2) : '1.02'}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: '#94a3b8' }}>Dysmetria Metric:</span>
+                    <span style={{ color: telemetry?.fingerToNose.dysmetriaType === 'Normometria' ? '#10b981' : '#f87171', fontWeight: 700 }}>
+                      {telemetry ? telemetry.fingerToNose.dysmetriaType : 'Normometria'}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: '#94a3b8' }}>Terminal Oscillation:</span>
+                    <span style={{ color: (telemetry?.fingerToNose.terminalIntentionPowerMm2 || 0) > 4 ? '#f87171' : '#34d399' }}>
+                      {telemetry ? telemetry.fingerToNose.terminalIntentionPowerMm2.toFixed(1) : '0.0'} mm
+                    </span>
+                  </div>
+                </div>
               </div>
+            ) : (
+              <div style={{ position: 'absolute', bottom: '0.75rem', right: '0.75rem', background: 'rgba(15, 23, 42, 0.88)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: '8px', padding: '0.65rem 0.85rem', width: '300px', pointerEvents: 'none', zIndex: 20, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.3rem' }}>
+                  <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    Tremor FFT Spectrum (0–16 Hz)
+                  </span>
+                  <span style={{ fontSize: '0.65rem', fontWeight: 800, color: telemetry && telemetry.tremorClassification === 'Parkinsonian Resting Tremor' ? '#f87171' : '#34d399' }}>
+                    {telemetry ? telemetry.tremorClassification : 'Baseline'}
+                  </span>
+                </div>
 
-              <div style={{ height: '55px', display: 'flex', alignItems: 'flex-end', gap: '2px', background: 'rgba(0,0,0,0.25)', padding: '0.25rem 0.15rem', borderRadius: '4px', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
-                {telemetry && telemetry.spectrumBins.map((bin, i) => {
-                  const isParkinsonBand = bin.frequency >= 4.0 && bin.frequency <= 6.5;
-                  const isEssentialBand = bin.frequency >= 7.5 && bin.frequency <= 12.0;
-                  const barHeight = Math.min(100, Math.max(6, (bin.power / 16) * 100));
+                <div style={{ height: '55px', display: 'flex', alignItems: 'flex-end', gap: '2px', background: 'rgba(0,0,0,0.25)', padding: '0.25rem 0.15rem', borderRadius: '4px', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                  {telemetry && telemetry.spectrumBins.map((bin, i) => {
+                    const isParkinsonBand = bin.frequency >= 4.0 && bin.frequency <= 6.5;
+                    const isEssentialBand = bin.frequency >= 7.5 && bin.frequency <= 12.0;
+                    const barHeight = Math.min(100, Math.max(6, (bin.power / 16) * 100));
 
-                  let barColor = 'rgba(255, 255, 255, 0.3)';
-                  if (bin.isPeak) barColor = '#ef4444';
-                  else if (isParkinsonBand) barColor = 'rgba(248, 113, 113, 0.75)';
-                  else if (isEssentialBand) barColor = 'rgba(192, 132, 252, 0.75)';
+                    let barColor = 'rgba(255, 255, 255, 0.3)';
+                    if (bin.isPeak) barColor = '#ef4444';
+                    else if (isParkinsonBand) barColor = 'rgba(248, 113, 113, 0.75)';
+                    else if (isEssentialBand) barColor = 'rgba(192, 132, 252, 0.75)';
 
-                  return (
-                    <div
-                      key={i}
-                      style={{ flex: 1, height: `${barHeight}%`, background: barColor, borderRadius: '1px 1px 0 0', transition: 'height 0.06s ease' }}
-                    />
-                  );
-                })}
+                    return (
+                      <div
+                        key={i}
+                        style={{ flex: 1, height: `${barHeight}%`, background: barColor, borderRadius: '1px 1px 0 0', transition: 'height 0.06s ease' }}
+                      />
+                    );
+                  })}
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.2rem', fontSize: '0.6rem', color: '#64748b', fontFamily: 'monospace' }}>
+                  <span>0 Hz</span>
+                  <span style={{ color: '#f87171' }}>4-6 Hz (Parkinson)</span>
+                  <span style={{ color: '#c084fc' }}>8-12 Hz (Essential)</span>
+                  <span>16 Hz</span>
+                </div>
               </div>
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.2rem', fontSize: '0.6rem', color: '#64748b', fontFamily: 'monospace' }}>
-                <span>0 Hz</span>
-                <span style={{ color: '#f87171' }}>4-6 Hz (Parkinson)</span>
-                <span style={{ color: '#c084fc' }}>8-12 Hz (Essential)</span>
-                <span>16 Hz</span>
-              </div>
-            </div>
+            )}
 
             {/* 5. BOTTOM-CENTER HUD: INSTANTANEOUS CLINICAL ALERT BANNER */}
-            <div style={{ position: 'absolute', bottom: '0.75rem', left: '50%', transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', gap: '0.5rem', background: telemetry?.clinicalAlert ? 'rgba(220, 38, 38, 0.95)' : telemetry?.targetReaching.isTargetLocked ? 'rgba(16, 185, 129, 0.95)' : 'rgba(15, 23, 42, 0.88)', backdropFilter: 'blur(8px)', border: `1px solid ${telemetry?.clinicalAlert ? '#fca5a5' : telemetry?.targetReaching.isTargetLocked ? '#86efac' : 'rgba(255, 255, 255, 0.15)'}`, padding: '0.45rem 1.15rem', borderRadius: '30px', color: '#ffffff', fontSize: '0.75rem', fontWeight: 800, pointerEvents: 'none', zIndex: 20, boxShadow: '0 4px 20px rgba(0,0,0,0.4)' }}>
+            <div style={{ position: 'absolute', bottom: '0.75rem', left: '50%', transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', gap: '0.5rem', background: telemetry?.clinicalAlert ? 'rgba(220, 38, 38, 0.95)' : telemetry?.fingerToNose.isNoseTouching ? 'rgba(16, 185, 129, 0.95)' : telemetry?.targetReaching.isTargetLocked ? 'rgba(16, 185, 129, 0.95)' : 'rgba(15, 23, 42, 0.90)', backdropFilter: 'blur(8px)', border: `1px solid ${telemetry?.clinicalAlert ? '#fca5a5' : telemetry?.fingerToNose.isNoseTouching || telemetry?.targetReaching.isTargetLocked ? '#86efac' : 'rgba(255, 255, 255, 0.15)'}`, padding: '0.45rem 1.15rem', borderRadius: '30px', color: '#ffffff', fontSize: '0.75rem', fontWeight: 800, pointerEvents: 'none', zIndex: 20, boxShadow: '0 4px 20px rgba(0,0,0,0.4)', whiteSpace: 'nowrap' }}>
               <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ffffff' }}></span>
-              {telemetry?.clinicalAlert || (activeProtocol === 'task-3-12' ? (telemetry?.targetReaching.isTargetLocked ? '🎯 TARGET LOCKED: CEREBELLAR DYSMETRIA < 3mm' : `REACH TOWARD TARGET (${telemetry?.targetReaching.distanceToTargetMm} mm)`) : telemetry?.isPinching ? 'FINGER PINCH CONTACT DETECTED' : 'BIOMECHANICAL MOTOR TELEMETRY ACTIVE')}
+              {telemetry?.clinicalAlert || (activeProtocol === 'task-3-12' ? (
+                telemetry?.fingerToNose.currentPhase === 'REACH_NOSE'
+                  ? `👉 STEP 1: TOUCH YOUR NOSE (d: ${telemetry.fingerToNose.distanceFingerToNoseMm} mm)`
+                  : telemetry?.fingerToNose.currentPhase === 'REACH_TARGET'
+                  ? `👉 STEP 2: EXTEND ARM TO EXAMINER TARGET (d: ${telemetry.fingerToNose.distanceFingerToTargetMm} mm)`
+                  : `👉 STEP 3: RETURN FINGER BACK TO NOSE (d: ${telemetry.fingerToNose.distanceFingerToNoseMm} mm)`
+              ) : telemetry?.isPinching ? 'FINGER PINCH CONTACT DETECTED' : 'BIOMECHANICAL MOTOR TELEMETRY ACTIVE')}
             </div>
 
             {/* Stop Vision Floating Button (Top Center) */}

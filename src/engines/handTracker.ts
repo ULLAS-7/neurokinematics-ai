@@ -3,7 +3,7 @@
  * & Kinetic Target Reaching Protocol (MDS-UPDRS Task 3.12 Dysmetria)
  */
 
-import { HandLandmark, TargetReachingState } from './kinematicsEngine';
+import { HandLandmark, TargetReachingState, FingerToNoseState } from './kinematicsEngine';
 
 export const BONE_CHAINS: Record<string, [number, number][]> = {
   thumb: [[0, 1], [1, 2], [2, 3], [3, 4]],
@@ -16,9 +16,12 @@ export const BONE_CHAINS: Record<string, [number, number][]> = {
 
 export class HighSpeedHandTracker {
   private mpHands: any = null;
+  private mpFace: any = null;
   private isMpReady = false;
   private isProcessing = false;
+  private isFaceProcessing = false;
   private latestLandmarks: HandLandmark[] | null = null;
+  private latestNose: HandLandmark | null = null;
   private latestHandedness: 'Right' | 'Left' | 'Unknown' = 'Unknown';
   private latestConfidence = 0;
 
@@ -40,7 +43,7 @@ export class HighSpeedHandTracker {
   private initMediaPipe() {
     try {
       const HandsClass = (window as any).Hands;
-      if (HandsClass) {
+      if (HandsClass && !this.mpHands) {
         this.mpHands = new HandsClass({
           locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
         });
@@ -71,6 +74,38 @@ export class HighSpeedHandTracker {
 
         console.log('✓ Google MediaPipe Hands 21-Joint 3D Engine initialized');
       }
+
+      // Initialize MediaPipe FaceMesh for Finger-to-Nose Protocol (Landmark 1: Nose Tip)
+      const FaceMeshClass = (window as any).FaceMesh;
+      if (FaceMeshClass && !this.mpFace) {
+        this.mpFace = new FaceMeshClass({
+          locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+        });
+
+        this.mpFace.setOptions({
+          maxNumFaces: 1,
+          refineLandmarks: false,
+          minDetectionConfidence: 0.5,
+          minTrackingConfidence: 0.5
+        });
+
+        this.mpFace.onResults((results: any) => {
+          this.isFaceProcessing = false;
+          if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+            const face = results.multiFaceLandmarks[0];
+            const nose = face[1] || face[4]; // Landmark 1: Anatomical tip of nose
+            if (nose) {
+              this.latestNose = {
+                x: nose.x,
+                y: nose.y,
+                z: nose.z || 0
+              };
+            }
+          }
+        });
+
+        console.log('✓ Google MediaPipe Face Mesh Engine initialized for FNT Protocol');
+      }
     } catch (err) {
       console.warn('MediaPipe initialization waiting for script load:', err);
     }
@@ -81,12 +116,13 @@ export class HighSpeedHandTracker {
     handedness: 'Right' | 'Left' | 'Unknown';
     confidence: number;
     engineType: string;
+    noseLandmark: HandLandmark | null;
   } {
     if (!video || video.readyState < 2) {
-      return { landmarks: null, handedness: 'Unknown', confidence: 0, engineType: 'Awaiting Video' };
+      return { landmarks: null, handedness: 'Unknown', confidence: 0, engineType: 'Awaiting Video', noseLandmark: null };
     }
 
-    if (!this.mpHands && (window as any).Hands) {
+    if ((!this.mpHands && (window as any).Hands) || (!this.mpFace && (window as any).FaceMesh)) {
       this.initMediaPipe();
     }
 
@@ -99,12 +135,24 @@ export class HighSpeedHandTracker {
       }
     }
 
+    if (this.mpFace && !this.isFaceProcessing) {
+      try {
+        this.isFaceProcessing = true;
+        this.mpFace.send({ image: video });
+      } catch (e) {
+        this.isFaceProcessing = false;
+      }
+    }
+
+    const activeNose = this.latestNose || { x: 0.50, y: 0.32, z: 0 };
+
     if (this.latestLandmarks && this.latestLandmarks.length === 21) {
       return {
         landmarks: this.latestLandmarks,
         handedness: this.latestHandedness,
         confidence: this.latestConfidence,
-        engineType: 'Google MediaPipe GPU WASM'
+        engineType: 'Google MediaPipe GPU WASM',
+        noseLandmark: activeNose
       };
     }
 
@@ -113,7 +161,8 @@ export class HighSpeedHandTracker {
       landmarks: cvFallback,
       handedness: 'Right',
       confidence: cvFallback ? 0.78 : 0,
-      engineType: cvFallback ? 'Optical Kinematic Sensor' : 'Searching for Hand'
+      engineType: cvFallback ? 'Optical Kinematic Sensor' : 'Searching for Hand',
+      noseLandmark: activeNose
     };
   }
 
@@ -246,54 +295,100 @@ export class HighSpeedHandTracker {
     isPinching: boolean,
     indexFlexionDeg = 150,
     targetState?: TargetReachingState,
-    isTargetMode = false
+    isTargetMode = false,
+    fingerToNose?: FingerToNoseState
   ) {
     ctx.clearRect(0, 0, width, height);
 
     const getX = (pt: HandLandmark) => (1 - pt.x) * width;
     const getY = (pt: HandLandmark) => pt.y * height;
 
-    // 0. Render Task 3.12 Kinetic Target Reticle (if Target Reaching Mode is Active)
-    if (isTargetMode && targetState) {
+    // 0. Render Task 3.12 / SARA Dual Reticle (Nose Target + Examiner Target)
+    if (isTargetMode && fingerToNose && targetState) {
+      const noseX = (1 - fingerToNose.noseCoords.x) * width;
+      const noseY = fingerToNose.noseCoords.y * height;
       const tgX = targetState.targetX * width;
       const tgY = targetState.targetY * height;
 
       ctx.save();
-      // Pulsing outer halo
+      // Guided Flight Corridor between Nose and Target
       ctx.beginPath();
-      ctx.arc(tgX, tgY, targetState.isTargetLocked ? 36 : 28, 0, 2 * Math.PI);
-      ctx.strokeStyle = targetState.isTargetLocked ? 'rgba(16, 185, 129, 0.8)' : 'rgba(56, 189, 248, 0.6)';
-      ctx.lineWidth = 2;
+      ctx.moveTo(noseX, noseY);
+      ctx.lineTo(tgX, tgY);
+      ctx.setLineDash([6, 6]);
+      ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // 0A. HOLOGRAPHIC NOSE RETICLE [N0]
+      const isNoseTouching = fingerToNose.isNoseTouching;
+      ctx.beginPath();
+      ctx.arc(noseX, noseY, isNoseTouching ? 36 : 28, 0, 2 * Math.PI);
+      ctx.strokeStyle = isNoseTouching ? 'rgba(16, 185, 129, 0.9)' : 'rgba(56, 189, 248, 0.7)';
+      ctx.lineWidth = 2.5;
       ctx.setLineDash([4, 4]);
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // Inner Target Bullseye
       ctx.beginPath();
-      ctx.arc(tgX, tgY, 14, 0, 2 * Math.PI);
-      ctx.fillStyle = targetState.isTargetLocked ? 'rgba(16, 185, 129, 0.4)' : 'rgba(2, 132, 199, 0.3)';
+      ctx.arc(noseX, noseY, 12, 0, 2 * Math.PI);
+      ctx.fillStyle = isNoseTouching ? 'rgba(16, 185, 129, 0.45)' : 'rgba(2, 132, 199, 0.35)';
       ctx.fill();
-      ctx.strokeStyle = targetState.isTargetLocked ? '#10b981' : '#38bdf8';
+      ctx.strokeStyle = isNoseTouching ? '#10b981' : '#38bdf8';
       ctx.lineWidth = 2.5;
       ctx.stroke();
 
-      // Crosshairs
       ctx.beginPath();
-      ctx.moveTo(tgX - 22, tgY); ctx.lineTo(tgX + 22, tgY);
-      ctx.moveTo(tgX, tgY - 22); ctx.lineTo(tgX, tgY + 22);
-      ctx.strokeStyle = targetState.isTargetLocked ? '#10b981' : '#38bdf8';
-      ctx.lineWidth = 1.5;
+      ctx.moveTo(noseX - 18, noseY); ctx.lineTo(noseX + 18, noseY);
+      ctx.moveTo(noseX, noseY - 18); ctx.lineTo(noseX, noseY + 18);
+      ctx.strokeStyle = isNoseTouching ? '#10b981' : '#38bdf8';
+      ctx.lineWidth = 2;
       ctx.stroke();
 
-      // Target Label
-      ctx.fillStyle = targetState.isTargetLocked ? '#34d399' : '#38bdf8';
+      ctx.fillStyle = isNoseTouching ? '#34d399' : '#38bdf8';
       ctx.font = '800 11px Inter, sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(
-        targetState.isTargetLocked ? '🎯 TARGET LOCKED' : `TARGET (${targetState.distanceToTargetMm} mm)`,
-        tgX,
-        tgY - 32
+        isNoseTouching ? '✅ NOSE TOUCHED' : `👃 NOSE [N0] (${fingerToNose.distanceFingerToNoseMm} mm)`,
+        noseX,
+        noseY - 32
       );
+
+      // 0B. VIRTUAL EXAMINER TARGET RETICLE [T1]
+      const isTargetLocked = targetState.isTargetLocked;
+      ctx.beginPath();
+      ctx.arc(tgX, tgY, isTargetLocked ? 38 : 30, 0, 2 * Math.PI);
+      ctx.strokeStyle = isTargetLocked ? 'rgba(16, 185, 129, 0.9)' : 'rgba(251, 191, 36, 0.75)';
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([4, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.beginPath();
+      ctx.arc(tgX, tgY, 14, 0, 2 * Math.PI);
+      ctx.fillStyle = isTargetLocked ? 'rgba(16, 185, 129, 0.45)' : 'rgba(245, 158, 11, 0.35)';
+      ctx.fill();
+      ctx.strokeStyle = isTargetLocked ? '#10b981' : '#fbbf24';
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(tgX - 22, tgY); ctx.lineTo(tgX + 22, tgY);
+      ctx.moveTo(tgX, tgY - 22); ctx.lineTo(tgX, tgY + 22);
+      ctx.strokeStyle = isTargetLocked ? '#10b981' : '#fbbf24';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      ctx.fillStyle = isTargetLocked ? '#34d399' : '#fbbf24';
+      ctx.font = '800 11px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(
+        isTargetLocked ? '🎯 TARGET LOCKED' : `🎯 TARGET [T1] (${targetState.distanceToTargetMm} mm)`,
+        tgX,
+        tgY - 34
+      );
+
       ctx.restore();
     }
 
@@ -342,15 +437,25 @@ export class HighSpeedHandTracker {
       }
     }
 
-    // Connect Index Tip to Target if in Target Reaching Mode
+    // Connect Index Tip to Active Goal (Nose or Target) based on FNT Phase
     if (isTargetMode && targetState) {
       const tgX = targetState.targetX * width;
       const tgY = targetState.targetY * height;
+      const noseX = fingerToNose ? (1 - fingerToNose.noseCoords.x) * width : width / 2;
+      const noseY = fingerToNose ? fingerToNose.noseCoords.y * height : height * 0.35;
+
+      const isGoingToNose = fingerToNose && (fingerToNose.currentPhase === 'REACH_NOSE' || fingerToNose.currentPhase === 'RETURN_NOSE');
+      const goalX = isGoingToNose ? noseX : tgX;
+      const goalY = isGoingToNose ? noseY : tgY;
+      const isLocked = isGoingToNose ? (fingerToNose && fingerToNose.isNoseTouching) : targetState.isTargetLocked;
+
       ctx.beginPath();
       ctx.moveTo(curIx, curIy);
-      ctx.lineTo(tgX, tgY);
+      ctx.lineTo(goalX, goalY);
       ctx.setLineDash([5, 5]);
-      ctx.strokeStyle = targetState.isTargetLocked ? 'rgba(16, 185, 129, 0.8)' : 'rgba(245, 158, 11, 0.75)';
+      ctx.strokeStyle = isLocked
+        ? 'rgba(16, 185, 129, 0.85)'
+        : (isGoingToNose ? 'rgba(56, 189, 248, 0.75)' : 'rgba(245, 158, 11, 0.75)');
       ctx.lineWidth = 2;
       ctx.stroke();
       ctx.setLineDash([]);
