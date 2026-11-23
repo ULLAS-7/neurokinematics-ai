@@ -124,21 +124,24 @@
 
 ---
 
-### 🦾 Slide 8: Technical Innovation: Joint Goniometry & Kinetic Trajectory Ribbons
-* **Slide Title**: Advanced Biomechanical Innovations: Joint Goniometry & Kinetic Trails
-* **Subtitle**: Sub-Pixel Angular Flexion and Real-Time Acceleration Visualization
+### 🦾 Slide 8: Technical Innovation: Dual-Anchor Finger-to-Nose Protocol (FNT) & Joint Goniometry
+* **Slide Title**: Clinical Innovation: Dual-Anchor Finger-to-Nose Protocol (FNT) & Joint Goniometry
+* **Subtitle**: Simultaneous Index Fingertip and Cranial Landmark 1 Tracking for SARA Ataxia Scoring
 * **Visual / Layout Recommendation**:
-  * Close-up annotated image of the hand showing:
-    1. The 3D Metacarpophalangeal (MCP) Joint Angle Arc ($\theta_{MCP}$).
-    2. The kinetic neon velocity ribbon trailing the index fingertip.
+  * Annotated visual showing:
+    1. The Holographic Cranial Nose Reticle `[N0]` on the subject's face.
+    2. The Virtual Examiner Target Reticle `[T1]` on the screen.
+    3. The 14-frame neon kinetic trajectory ribbon showing 3D path tortuosity.
 * **Key Bullet Points**:
-  * **Micro-Goniometer Joint Flexion ($\theta$)**:
-    $$\theta_{MCP} = \arccos\left(\frac{\vec{v}_{5\to 6} \cdot \vec{v}_{6\to 7}}{\|\vec{v}_{5\to 6}\| \|\vec{v}_{6\to 7}\|}\right) \times \frac{180}{\pi}$$
-    * Continuously graphs finger joint extension ($180^\circ$) vs. closed flexion ($90^\circ$).
-  * **Kinetic Velocity Vector Ribbon**:
-    * 14-frame alpha-blended trajectory trail revealing micro-tremor jitter, sudden motor blocks, and acceleration smoothness (jerk metric).
-  * **Postural Stability Index (TSI %)**:
-    * Quantifies spatial variance during postural hold tasks; immediately flags subtle downward motor drift or cogwheel rigidity.
+  * **Dual-Anchor Coordinate Tracking**:
+    * Simultaneously computes 3D Euclidean vectors for the index fingertip ($J_8$) and the anatomical nasal bridge ($N_0$, MediaPipe FaceMesh Landmark 1).
+  * **Path Curvature Index ($\kappa$) & Movement Decomposition (Asynergia)**:
+    $$\kappa = \frac{L_{\text{actual}}}{L_{\text{euclidean}}} = \frac{\int \|\dot{\vec{r}}(t)\| dt}{\|\vec{r}_{\text{target}} - \vec{r}_{\text{nose}}\|}$$
+    * Smooth coordinated arc: $\kappa \approx 1.05\text{--}1.15$ (Healthy Baseline).
+    * Decomposed ataxic trajectory: $\kappa > 1.35$ (Cerebellar Ataxia).
+  * **Terminal Intention Tremor & Past-Pointing Hypermetria**:
+    * Isolates intention tremor bursts ($3.0\text{--}4.5\text{ Hz}$) occurring strictly within $50\text{ mm}$ of the nose/target, quantifying deceleration braking failure.
+  * **Joint Goniometry ($\theta$)**: Continuous MCP/CMC angular flexion arcs ($180^\circ \to 90^\circ$).
 
 ---
 
@@ -146,13 +149,14 @@
 * **Slide Title**: Auditory Sonification: Zero-Latency Multimodal Feedback
 * **Subtitle**: Reinforcing Real-Time Detection with Synthesized Micro-Acoustic Cues
 * **Visual / Layout Recommendation**:
-  * Audio waveform graph showing the 35ms contact chirp ($880\text{ Hz} \to 320\text{ Hz}$).
+  * Audio waveform graph showing the contact chirps and harmonic target chimes.
 * **Key Bullet Points**:
   * **The Perception Problem**: In pure visual displays, microsecond frame pacing can feel abstract.
   * **Sub-Millisecond Acoustic Feedback**:
-    * Integrated Web Audio API synthesizes a crisp $35\text{ ms}$ contact click the exact moment the index and thumb make contact ($d < 18\text{ mm}$).
-    * Delivers immediate auditory confirmation to both the evaluator and patient that physical contact was detected with zero delay.
-  * **Clinical Alert Sonification**: Dual-tone chime ($587\text{ Hz} \to 880\text{ Hz}$) warns of sudden freezing arrests or amplitude decay $>50\%$.
+    * Integrated Web Audio API synthesizes a crisp contact click on pinch impact ($d < 18\text{ mm}$).
+    * Distinctive resonant bell ($1046\text{ Hz}$, C6) confirms anatomical nose contact.
+    * Harmonic target lock chime ($659\text{ Hz} \to 880\text{ Hz}$) and victory triad (C-E-G) on completed round-trip cycles.
+  * **Clinical Alert Sonification**: Dual-tone cautionary buzzer ($180\text{--}220\text{ Hz}$) warns of past-pointing overshoot or freezing motor blocks.
 
 ---
 
@@ -164,28 +168,30 @@
 * **Key Bullet Points**:
   * **Automated Documentation**: Replaces manual note-taking with an instant, reproducible diagnostic summary.
   * **Quantitative Metrics Included**:
-    * MDS-UPDRS Part III Severity Rating (Grade 0 to 4).
+    * MDS-UPDRS Part III Severity Rating (Grade 0 to 4) & SARA Ataxia Rating.
     * Mean Reciprocal Cadence ($Hz$) and Peak Velocity ($mm/s$).
     * Amplitude Decrement Percentage and Rhythm Regularity ($CV_{ITI} \%$).
+    * Finger-to-Nose Path Curvature ($\kappa$) and Terminal Intention Oscillation ($mm^2$).
     * Dominant Tremor Frequency Peak ($Hz$) and Power Spectral Density ($mm^2$).
-    * Basal ganglia pathophysiological interpretation and physician verification block.
+    * Basal ganglia vs cerebellar pathophysiological interpretation and physician verification block.
 
 ---
 
 ### 🎯 Slide 11: Live Demonstration Protocol for Judges & Evaluators
-* **Slide Title**: Seminar Live Demonstration: 3 Actions That Prove It Is Not AI Slop
-* **Subtitle**: The Undeniable 60-Second Interactive Presentation Walkthrough
+* **Slide Title**: Seminar Live Demonstration: 4 Actions That Prove It Is Not AI Slop
+* **Subtitle**: The Undeniable 90-Second Interactive Presentation Walkthrough
 * **Visual / Layout Recommendation**:
-  * 3 Step-by-Step Action Cards with icons representing the live gestures:
-    1. Fast Tapping $\to$ 2. Bradykinesia Deceleration $\to$ 3. Hand Shaking $\to$ 4. Judge Invitation.
+  * 4 Step-by-Step Action Cards with icons representing the live gestures:
+    1. Fast Tapping vs Fatigue $\to$ 2. Postural Shaking (FFT) $\to$ 3. Finger-to-Nose Reaching $\to$ 4. Judge Hands-On Test.
 * **Key Bullet Points**:
-  * **Action 1 (Fast vs. Slow Tapping)**:
-    * Tap fingers rapidly $\implies$ Cadence reads **$4.8\text{ Hz}$** with tactile audio clicks.
-    * Deliberately slow down $\implies$ Screen triggers **`[ ⚠️ SEVERE HYPOKINESIA: AMPLITUDE DECAY > 50% ]`**.
-  * **Action 2 (Hand Tremor Frequency Shift)**:
-    * Shake hand gently $\implies$ Welch's FFT spectrum spikes a sharp red peak at **$5.2\text{ Hz}$** (Parkinsonian band).
-  * **Action 3 (The Ultimate Finisher)**:
-    * Hand the camera to the judge: *"Sir, hold your own hand up."* The 3D skeleton snaps to their fingers and measures their healthy baseline, proving the system is 100% dynamic and un-falsifiable.
+  * **Action 1 (Sequence Effect - Task 3.4)**:
+    * Tap rapidly, then deliberately slow and shrink opening $\implies$ Amplitude Decay surges $>35\%$, triggering amber alert `[ ⚠️ SEVERE HYPOKINESIA ]` and elevating Parkinson's probability to $>85\%$.
+  * **Action 2 (Welch's FFT Frequency Split - Task 3.15)**:
+    * Rapidly shake fingers ($9\text{ Hz}$) $\implies$ Live purple FFT bar spikes at $9.4\text{ Hz}$, swinging probability to Essential Action Tremor (ET $>90\%$), proving it doesn't falsely diagnose Parkinson's.
+  * **Action 3 (Finger-to-Nose Test - Task 3.12)**:
+    * Touch nose (auditory bell), reach to examiner target (chime), return to nose with deliberate terminal wobble $\implies$ Past-pointing dysmetria flags, Cerebellar Ataxia surges to $>90\%$.
+  * **Action 4 (The Ultimate Finisher - Judge Participation)**:
+    * Invite the evaluator: *"Sir, hold your own hand up."* Real-time coordinates update at 60 FPS ($<16\text{ ms}$), proving 100% live computer vision and zero pre-recorded data.
 
 ---
 
