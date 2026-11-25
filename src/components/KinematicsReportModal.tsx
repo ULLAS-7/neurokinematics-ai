@@ -62,7 +62,16 @@ export const KinematicsReportModal: React.FC<KinematicsReportModalProps> = ({
       `- Rhythm Irregularity (CV_ITI): ${telemetry.rhythmRegularityCv}%`,
       `- Tremor FFT Peak: ${telemetry.tremorFrequencyHz > 0 ? `${telemetry.tremorFrequencyHz} Hz (${telemetry.tremorPowerMm2} mm^2)` : 'None (<1.5 Hz)'} [${telemetry.tremorClassification}]`,
       `- Finger-to-Nose (FNT) Curvature (kappa): ${telemetry.fingerToNose.pathCurvatureIndex.toFixed(2)} (${telemetry.fingerToNose.completedCycles} cycles) [${telemetry.fingerToNose.clinicalSeverity}]`,
-      `- Motor Blocks / Freezing Pauses: ${telemetry.freezingArrestsCount}`
+      `- Motor Blocks / Freezing Pauses: ${telemetry.freezingArrestsCount}`,
+      ...(telemetry.timedTrial ? [
+        '',
+        `20-SECOND TEMPORAL PROGRESSION VALIDATION (${telemetry.timedTrial.durationSec}s Timed Span):`,
+        `- Verdict: ${telemetry.timedTrial.progressionVerdict}`,
+        `- Validation Note: ${telemetry.timedTrial.clinicalValidationNote}`,
+        `- Epoch 1 (0-10s): ${telemetry.timedTrial.initialEpoch.tapCount} taps, ${telemetry.timedTrial.initialEpoch.cadenceHz} Hz, ${telemetry.timedTrial.initialEpoch.meanApertureMm} mm, ${telemetry.timedTrial.initialEpoch.meanVelocityMmS} mm/s, Peak Tremor ${telemetry.timedTrial.initialEpoch.peakTremorFreqHz} Hz (${telemetry.timedTrial.initialEpoch.peakTremorPowerMm2} mm^2)`,
+        `- Epoch 2 (10-20s): ${telemetry.timedTrial.terminalEpoch.tapCount} taps, ${telemetry.timedTrial.terminalEpoch.cadenceHz} Hz, ${telemetry.timedTrial.terminalEpoch.meanApertureMm} mm, ${telemetry.timedTrial.terminalEpoch.meanVelocityMmS} mm/s, Peak Tremor ${telemetry.timedTrial.terminalEpoch.peakTremorFreqHz} Hz (${telemetry.timedTrial.terminalEpoch.peakTremorPowerMm2} mm^2)`,
+        `- 20s Gradual Shift: Cadence ${telemetry.timedTrial.cadenceChangePercent}%, Aperture ${telemetry.timedTrial.apertureChangePercent}%, Velocity ${telemetry.timedTrial.velocityChangePercent}%`
+      ] : [])
     ].join('\n');
 
     const blob = new Blob([summaryText], { type: 'text/plain;charset=utf-8' });
@@ -211,6 +220,68 @@ export const KinematicsReportModal: React.FC<KinematicsReportModalProps> = ({
               <p style={{ margin: '0.2rem 0 0 0', fontSize: '1.2rem', fontWeight: 900, color: '#16a34a', fontFamily: 'monospace' }}>{telemetry.differential.healthyBaselineProb}%</p>
             </div>
           </div>
+
+          {/* 20-Second Temporal Progression Validation Card (Epoch 1: 0-10s vs Epoch 2: 10-20s) */}
+          {telemetry.timedTrial && (
+            <div style={{ background: '#f0f9ff', border: '1.5px solid #bae6fd', borderRadius: '8px', padding: '1rem 1.25rem', marginBottom: '1.5rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.45rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: 900, color: '#0369a1', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  ⏱️ {telemetry.timedTrial.durationSec}-Second Timed Trial Validation (Epoch 1 vs Epoch 2)
+                </span>
+                <span style={{ fontSize: '0.72rem', fontWeight: 800, padding: '0.2rem 0.6rem', borderRadius: '4px', background: '#0284c7', color: '#ffffff' }}>
+                  {telemetry.timedTrial.progressionVerdict}
+                </span>
+              </div>
+              <p style={{ fontSize: '0.78rem', color: '#0c4a6e', margin: '0 0 0.75rem 0', lineHeight: 1.45 }}>
+                {telemetry.timedTrial.clinicalValidationNote}
+              </p>
+
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.76rem', background: '#ffffff', borderRadius: '6px', overflow: 'hidden', border: '1px solid #e0f2fe' }}>
+                <thead>
+                  <tr style={{ background: '#e0f2fe', color: '#0c4a6e' }}>
+                    <th style={{ textAlign: 'left', padding: '0.45rem 0.65rem' }}>20s Progression Metric</th>
+                    <th style={{ textAlign: 'left', padding: '0.45rem 0.65rem' }}>Initial Epoch (0–10s)</th>
+                    <th style={{ textAlign: 'left', padding: '0.45rem 0.65rem' }}>Terminal Epoch (10–20s)</th>
+                    <th style={{ textAlign: 'left', padding: '0.45rem 0.65rem' }}>Gradual Shift</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
+                    <td style={{ padding: '0.45rem 0.65rem', fontWeight: 600 }}>Tapping Cadence</td>
+                    <td style={{ padding: '0.45rem 0.65rem', fontFamily: 'monospace', fontWeight: 700 }}>{telemetry.timedTrial.initialEpoch.cadenceHz} Hz ({telemetry.timedTrial.initialEpoch.tapCount} taps)</td>
+                    <td style={{ padding: '0.45rem 0.65rem', fontFamily: 'monospace', fontWeight: 700 }}>{telemetry.timedTrial.terminalEpoch.cadenceHz} Hz ({telemetry.timedTrial.terminalEpoch.tapCount} taps)</td>
+                    <td style={{ padding: '0.45rem 0.65rem', fontWeight: 800, color: telemetry.timedTrial.cadenceChangePercent <= -20 ? '#dc2626' : '#16a34a' }}>
+                      {telemetry.timedTrial.cadenceChangePercent > 0 ? '+' : ''}{telemetry.timedTrial.cadenceChangePercent}%
+                    </td>
+                  </tr>
+                  <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
+                    <td style={{ padding: '0.45rem 0.65rem', fontWeight: 600 }}>Pinch Aperture Width</td>
+                    <td style={{ padding: '0.45rem 0.65rem', fontFamily: 'monospace', fontWeight: 700 }}>{telemetry.timedTrial.initialEpoch.meanApertureMm} mm</td>
+                    <td style={{ padding: '0.45rem 0.65rem', fontFamily: 'monospace', fontWeight: 700 }}>{telemetry.timedTrial.terminalEpoch.meanApertureMm} mm</td>
+                    <td style={{ padding: '0.45rem 0.65rem', fontWeight: 800, color: telemetry.timedTrial.apertureChangePercent <= -20 ? '#dc2626' : '#16a34a' }}>
+                      {telemetry.timedTrial.apertureChangePercent > 0 ? '+' : ''}{telemetry.timedTrial.apertureChangePercent}%
+                    </td>
+                  </tr>
+                  <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
+                    <td style={{ padding: '0.45rem 0.65rem', fontWeight: 600 }}>Mean Kinetic Velocity</td>
+                    <td style={{ padding: '0.45rem 0.65rem', fontFamily: 'monospace', fontWeight: 700 }}>{telemetry.timedTrial.initialEpoch.meanVelocityMmS} mm/s</td>
+                    <td style={{ padding: '0.45rem 0.65rem', fontFamily: 'monospace', fontWeight: 700 }}>{telemetry.timedTrial.terminalEpoch.meanVelocityMmS} mm/s</td>
+                    <td style={{ padding: '0.45rem 0.65rem', fontWeight: 800, color: telemetry.timedTrial.velocityChangePercent <= -25 ? '#dc2626' : '#16a34a' }}>
+                      {telemetry.timedTrial.velocityChangePercent > 0 ? '+' : ''}{telemetry.timedTrial.velocityChangePercent}%
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style={{ padding: '0.45rem 0.65rem', fontWeight: 600 }}>Peak Tremor PSD</td>
+                    <td style={{ padding: '0.45rem 0.65rem', fontFamily: 'monospace' }}>{telemetry.timedTrial.initialEpoch.peakTremorFreqHz} Hz ({telemetry.timedTrial.initialEpoch.peakTremorPowerMm2} mm²)</td>
+                    <td style={{ padding: '0.45rem 0.65rem', fontFamily: 'monospace' }}>{telemetry.timedTrial.terminalEpoch.peakTremorFreqHz} Hz ({telemetry.timedTrial.terminalEpoch.peakTremorPowerMm2} mm²)</td>
+                    <td style={{ padding: '0.45rem 0.65rem', fontWeight: 700, color: '#475569' }}>
+                      {telemetry.timedTrial.terminalEpoch.peakTremorPowerMm2 > telemetry.timedTrial.initialEpoch.peakTremorPowerMm2 + 1.5 ? 'Escalated' : telemetry.timedTrial.terminalEpoch.peakTremorPowerMm2 > 2.5 ? 'Sustained' : 'Minimal'}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
 
           {/* Quantitative Kinematics Biomarker Matrix */}
           <h3 style={{ fontSize: '0.85rem', fontWeight: 800, color: '#0f172a', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.75rem', borderBottom: '1px solid #e2e8f0', paddingBottom: '0.4rem' }}>

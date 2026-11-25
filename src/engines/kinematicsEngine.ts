@@ -70,6 +70,29 @@ export interface FingerToNoseState {
   clinicalSeverity: 'Normal (SARA Grade 0)' | 'Mild Dysmetria (SARA Grade 1)' | 'Moderate Ataxia (SARA Grade 2)' | 'Severe Ataxia (SARA Grade 3)';
 }
 
+export interface EpochMetrics {
+  tapCount: number;
+  cadenceHz: number;
+  meanApertureMm: number;
+  meanVelocityMmS: number;
+  peakTremorFreqHz: number;
+  peakTremorPowerMm2: number;
+  fntCycles: number;
+  fntCurvature: number;
+}
+
+export interface TimedTrialSummary {
+  durationSec: number;
+  isTimedTrial: boolean;
+  initialEpoch: EpochMetrics;   // First half (0–10s)
+  terminalEpoch: EpochMetrics;  // Second half (10–20s)
+  cadenceChangePercent: number; // Negative = gradual slowing across 20s
+  apertureChangePercent: number; // Negative = gradual amplitude shrink across 20s
+  velocityChangePercent: number; // Negative = gradual velocity drop across 20s
+  progressionVerdict: string;
+  clinicalValidationNote: string;
+}
+
 export interface KinematicsTelemetry {
   timestamp: number;
   // Current Live Geometric State
@@ -113,6 +136,8 @@ export interface KinematicsTelemetry {
 
   // Recent Kinetic Waveform History for Oscilloscope (last 180 frames)
   apertureHistory: { t: number; aperture: number; velocity: number }[];
+  // Optional 20s Timed Trial Temporal Progression Validation
+  timedTrial?: TimedTrialSummary;
 }
 
 export class KinematicsEngine {
@@ -157,7 +182,33 @@ export class KinematicsEngine {
   private sessionWorstFntTerminalOsc = 0;
   private lastValidTelemetry: KinematicsTelemetry | null = null;
 
+  // 20-Second Timed Clinical Trial Epoch Tracking (0–10s vs 10–20s progression)
+  private timedTrialStartMs: number | null = null;
+  private timedTrialDurationMs = 20000;
+  private isTimedTrialCompleted = false;
+  private epochSamples: {
+    elapsedMs: number;
+    apertureMm: number;
+    velocityMmS: number;
+    tremorFreqHz: number;
+    tremorPowerMm2: number;
+    fntCurvature: number;
+    fntCycles: number;
+  }[] = [];
+
   private readonly MM_SCALE = 160; 
+
+  public startTimedTrial(durationMs = 20000) {
+    this.resetSession();
+    this.timedTrialStartMs = Date.now();
+    this.timedTrialDurationMs = durationMs;
+    this.isTimedTrialCompleted = false;
+  }
+
+  public cancelTimedTrial() {
+    this.timedTrialStartMs = null;
+    this.isTimedTrialCompleted = false;
+  }
 
   public resetSession() {
     this.apertureHistory = [];
@@ -189,6 +240,10 @@ export class KinematicsEngine {
     this.sessionWorstFntCurvature = 1.02;
     this.sessionWorstFntTerminalOsc = 0;
     this.lastValidTelemetry = null;
+
+    this.timedTrialStartMs = null;
+    this.isTimedTrialCompleted = false;
+    this.epochSamples = [];
   }
 
   public processLandmarks(
@@ -470,6 +525,22 @@ export class KinematicsEngine {
       classification
     );
 
+    // Record timestamped telemetry inside active 20s clinical trial window
+    if (this.timedTrialStartMs !== null) {
+      const elapsedMs = now - this.timedTrialStartMs;
+      if (elapsedMs >= 0 && elapsedMs <= this.timedTrialDurationMs + 500) {
+        this.epochSamples.push({
+          elapsedMs,
+          apertureMm,
+          velocityMmS,
+          tremorFreqHz: peakFreq,
+          tremorPowerMm2: peakPower,
+          fntCurvature: this.fntCurvatureIndex,
+          fntCycles: this.fntCompletedCycles
+        });
+      }
+    }
+
     // Persist strongest pathological / clinical findings for accurate Diagnostic Report
     if (peakPower > 2.5 && peakFreq >= 1.5 && peakPower >= this.sessionPeakTremorPower) {
       this.sessionPeakTremorFreq = peakFreq;
@@ -525,13 +596,71 @@ export class KinematicsEngine {
     return liveResult;
   }
 
+  private computeEpochSlice(startMs: number, endMs: number, isSecondHalf: boolean, prevHalfCycles: number): EpochMetrics {
+    const startEpochTs = (this.timedTrialStartMs || Date.now()) + startMs;
+    const endEpochTs = (this.timedTrialStartMs || Date.now()) + endMs;
+
+    const tapsInEpoch = this.taps.filter(t => t.timestamp >= startEpochTs && t.timestamp < endEpochTs);
+    const samplesInEpoch = this.epochSamples.filter(s => s.elapsedMs >= startMs && s.elapsedMs < endMs);
+
+    let cadenceHz = 0;
+    if (tapsInEpoch.length >= 2) {
+      const spanSec = Math.max(0.5, (tapsInEpoch[tapsInEpoch.length - 1].timestamp - tapsInEpoch[0].timestamp) / 1000);
+      cadenceHz = Math.round(((tapsInEpoch.length - 1) / spanSec) * 10) / 10;
+    } else if (tapsInEpoch.length === 1) {
+      cadenceHz = 0.2;
+    }
+
+    const meanApertureMm = tapsInEpoch.length > 0
+      ? Math.round((tapsInEpoch.reduce((sum, t) => sum + t.aperture, 0) / tapsInEpoch.length) * 10) / 10
+      : samplesInEpoch.length > 0
+      ? Math.round((samplesInEpoch.reduce((sum, s) => sum + s.apertureMm, 0) / samplesInEpoch.length) * 10) / 10
+      : 0;
+
+    const nonZeroVelocities = samplesInEpoch.map(s => s.velocityMmS).filter(v => v > 15);
+    const meanVelocityMmS = nonZeroVelocities.length > 0
+      ? Math.round(nonZeroVelocities.reduce((a, b) => a + b, 0) / nonZeroVelocities.length)
+      : tapsInEpoch.length > 0
+      ? Math.round(tapsInEpoch.reduce((a, b) => a + b.velocity, 0) / tapsInEpoch.length)
+      : 0;
+
+    let peakTremorPowerMm2 = 0;
+    let peakTremorFreqHz = 0;
+    for (const s of samplesInEpoch) {
+      if (s.tremorPowerMm2 > peakTremorPowerMm2 && s.tremorFreqHz >= 1.5) {
+        peakTremorPowerMm2 = s.tremorPowerMm2;
+        peakTremorFreqHz = s.tremorFreqHz;
+      }
+    }
+
+    const maxCycles = samplesInEpoch.length > 0 ? Math.max(...samplesInEpoch.map(s => s.fntCycles)) : 0;
+    const fntCycles = isSecondHalf ? Math.max(0, maxCycles - prevHalfCycles) : maxCycles;
+    const fntCurvature = samplesInEpoch.length > 0
+      ? Math.round(Math.max(...samplesInEpoch.map(s => s.fntCurvature)) * 100) / 100
+      : 1.02;
+
+    return {
+      tapCount: tapsInEpoch.length,
+      cadenceHz,
+      meanApertureMm,
+      meanVelocityMmS,
+      peakTremorFreqHz,
+      peakTremorPowerMm2: Math.round(peakTremorPowerMm2 * 10) / 10,
+      fntCycles,
+      fntCurvature
+    };
+  }
+
   /**
    * Returns a frozen diagnostic snapshot combining all cumulative & peak-recorded
-   * findings across the active exam session so the Report stays accurate even after
-   * the user stops trembling or lowers their hand to click "Report".
+   * findings across the active exam session (plus 20s Epoch 1 vs Epoch 2 validation).
    */
-  public getSessionReportTelemetry(): KinematicsTelemetry {
+  public getSessionReportTelemetry(finalizeTimedTrial = false): KinematicsTelemetry {
     const base = this.lastValidTelemetry || this.generateEmptyTelemetry(Date.now());
+
+    if (finalizeTimedTrial && this.timedTrialStartMs !== null) {
+      this.isTimedTrialCompleted = true;
+    }
 
     const usePeakTremor = this.sessionPeakTremorPower > 2.5 && this.sessionPeakTremorPower > base.tremorPowerMm2;
     const reportTremorFreq = usePeakTremor ? this.sessionPeakTremorFreq : base.tremorFrequencyHz;
@@ -542,9 +671,69 @@ export class KinematicsEngine {
     const reportFntCurvature = Math.max(base.fingerToNose.pathCurvatureIndex, this.sessionWorstFntCurvature);
     const reportTerminalOsc = Math.max(base.targetReaching.terminalOscillationMm, this.sessionWorstFntTerminalOsc);
 
+    let effectiveDecayPercent = base.amplitudeDecayPercent;
+    let effectiveCadenceHz = base.meanCadenceHz;
+    let timedTrial: TimedTrialSummary | undefined = undefined;
+
+    if (this.timedTrialStartMs !== null && (finalizeTimedTrial || this.isTimedTrialCompleted || this.epochSamples.length > 0)) {
+      const halfMs = this.timedTrialDurationMs / 2;
+      const initialEpoch = this.computeEpochSlice(0, halfMs, false, 0);
+      const terminalEpoch = this.computeEpochSlice(halfMs, this.timedTrialDurationMs + 500, true, initialEpoch.fntCycles);
+
+      const pctDelta = (initVal: number, termVal: number) =>
+        initVal > 0 ? Math.round(((termVal - initVal) / initVal) * 100) : 0;
+
+      const cadenceChangePercent = pctDelta(initialEpoch.cadenceHz, terminalEpoch.cadenceHz);
+      const apertureChangePercent = pctDelta(initialEpoch.meanApertureMm, terminalEpoch.meanApertureMm);
+      const velocityChangePercent = pctDelta(initialEpoch.meanVelocityMmS, terminalEpoch.meanVelocityMmS);
+
+      // Integrate 20s Epoch-1 -> Epoch-2 gradual amplitude/speed drop into decay & cadence
+      if (initialEpoch.tapCount >= 2 && terminalEpoch.tapCount >= 1) {
+        const epochDrop = apertureChangePercent < 0 ? Math.abs(apertureChangePercent) : 0;
+        const speedDrop = velocityChangePercent < 0 ? Math.round(Math.abs(velocityChangePercent) * 0.75) : 0;
+        effectiveDecayPercent = Math.max(effectiveDecayPercent, epochDrop, speedDrop);
+        if (terminalEpoch.cadenceHz > 0) {
+          effectiveCadenceHz = Math.round(((initialEpoch.cadenceHz + terminalEpoch.cadenceHz) / 2) * 10) / 10;
+        }
+      } else if (velocityChangePercent <= -28 && initialEpoch.meanVelocityMmS > 60) {
+        effectiveDecayPercent = Math.max(effectiveDecayPercent, Math.abs(velocityChangePercent));
+      }
+
+      let progressionVerdict = 'Insufficient Motor Data Captured in 20s Window';
+      let clinicalValidationNote = 'No continuous hand tracking captured during the 20s timed trial. Keep hand visible inside camera view.';
+
+      if (this.epochSamples.length >= 20 || this.taps.length >= 2) {
+        if (apertureChangePercent <= -25 || cadenceChangePercent <= -25 || velocityChangePercent <= -30) {
+          progressionVerdict = 'Progressive Motor Slowing & Sequence Effect Confirmed (0–10s → 10–20s)';
+          clinicalValidationNote = `Validated across the 20s exam: cadence changed ${cadenceChangePercent}%, aperture amplitude ${apertureChangePercent}%, and velocity ${velocityChangePercent}% from Epoch 1 to Epoch 2—consistent with progressive basal ganglia fatigue.`;
+        } else if (reportTremorPower > 2.5) {
+          progressionVerdict = `Sustained ${reportTremorClass} Validated (${reportTremorFreq} Hz Peak)`;
+          clinicalValidationNote = `Within the 20s window, Welch's FFT detected consistent oscillatory power (Epoch 1: ${initialEpoch.peakTremorPowerMm2} mm² → Epoch 2: ${terminalEpoch.peakTremorPowerMm2} mm²) peaking at ${reportTremorFreq} Hz.`;
+        } else if (reportFntCurvature > 1.25 || reportTerminalOsc > 5.0) {
+          progressionVerdict = 'Kinetic Dysmetria & Ataxic Drift Validated in 20s Trial';
+          clinicalValidationNote = `Dual-Anchor Finger-to-Nose tracking over 20s measured path curvature κ = ${reportFntCurvature.toFixed(2)} and terminal oscillation ${reportTerminalOsc} mm.`;
+        } else {
+          progressionVerdict = 'Stable Motor Endurance Across Full 20s Timed Trial';
+          clinicalValidationNote = `Subject sustained consistent cadence (${initialEpoch.cadenceHz} Hz → ${terminalEpoch.cadenceHz} Hz) and aperture (${initialEpoch.meanApertureMm} mm → ${terminalEpoch.meanApertureMm} mm) across both 10s epochs without pathological fatigue.`;
+        }
+      }
+
+      timedTrial = {
+        durationSec: Math.round(this.timedTrialDurationMs / 1000),
+        isTimedTrial: true,
+        initialEpoch,
+        terminalEpoch,
+        cadenceChangePercent,
+        apertureChangePercent,
+        velocityChangePercent,
+        progressionVerdict,
+        clinicalValidationNote
+      };
+    }
+
     const differential = this.computeMovementDisorderDifferential(
-      base.meanCadenceHz,
-      base.amplitudeDecayPercent,
+      effectiveCadenceHz,
+      effectiveDecayPercent,
       base.rhythmRegularityCv,
       reportTremorFreq,
       reportTremorPower,
@@ -555,8 +744,8 @@ export class KinematicsEngine {
     );
 
     const { grade, interpretation, alert } = this.evaluateUprdGrade(
-      base.meanCadenceHz,
-      base.amplitudeDecayPercent,
+      effectiveCadenceHz,
+      effectiveDecayPercent,
       base.rhythmRegularityCv,
       base.freezingArrestsCount,
       reportTremorFreq,
@@ -566,6 +755,8 @@ export class KinematicsEngine {
 
     return {
       ...base,
+      meanCadenceHz: effectiveCadenceHz,
+      amplitudeDecayPercent: effectiveDecayPercent,
       tremorFrequencyHz: reportTremorFreq,
       tremorPowerMm2: reportTremorPower,
       tremorClassification: reportTremorClass,
@@ -578,7 +769,8 @@ export class KinematicsEngine {
       differential,
       updrsGrade: grade,
       updrsInterpretation: interpretation,
-      clinicalAlert: alert
+      clinicalAlert: alert,
+      timedTrial
     };
   }
 

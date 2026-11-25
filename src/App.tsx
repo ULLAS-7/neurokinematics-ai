@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Camera, VideoOff, Activity, ShieldCheck, Maximize2, Minimize2,
-  Volume2, VolumeX, FileText, RefreshCw, AlertTriangle, CheckCircle2, ChevronRight, Target
+  Volume2, VolumeX, FileText, RefreshCw, AlertTriangle, CheckCircle2, ChevronRight, Target, Timer
 } from 'lucide-react';
 import { KinematicsEngine, KinematicsTelemetry } from './engines/kinematicsEngine';
 import { HighSpeedHandTracker } from './engines/handTracker';
@@ -21,10 +21,14 @@ export const App: React.FC = () => {
   // Active Examination Protocol
   const [activeProtocol, setActiveProtocol] = useState<'task-3-4' | 'task-3-12' | 'task-3-15'>('task-3-4');
 
-  // Modals
+  // Modals & 20-Second Timed Clinical Trial State
   const [isReportOpen, setIsReportOpen] = useState<boolean>(false);
   const [reportSnapshot, setReportSnapshot] = useState<KinematicsTelemetry | null>(null);
   const [isDefenseModalOpen, setIsDefenseModalOpen] = useState<boolean>(false);
+  const [isTrialRunning, setIsTrialRunning] = useState<boolean>(false);
+  const [trialRemainingSec, setTrialRemainingSec] = useState<number>(20);
+  const trialStartTimestampRef = useRef<number>(0);
+  const midpointChimedRef = useRef<boolean>(false);
 
   // Raw Landmark Coordinates for Live Transparency Inspector
   const [rawCoordinates, setRawCoordinates] = useState<{
@@ -93,6 +97,8 @@ export const App: React.FC = () => {
   };
 
   const handleResetSession = () => {
+    setIsTrialRunning(false);
+    setTrialRemainingSec(20);
     kinematicsEngineRef.current.resetSession();
     setTelemetry(null);
     setReportSnapshot(null);
@@ -102,6 +108,52 @@ export const App: React.FC = () => {
     setReportSnapshot(kinematicsEngineRef.current.getSessionReportTelemetry());
     setIsReportOpen(true);
   };
+
+  const handleStartTimedTrial = () => {
+    setReportSnapshot(null);
+    setIsReportOpen(false);
+    kinematicsEngineRef.current.startTimedTrial(20000);
+    trialStartTimestampRef.current = Date.now();
+    midpointChimedRef.current = false;
+    setTrialRemainingSec(20);
+    setIsTrialRunning(true);
+    audioSonifier.playMetronomeTick(true);
+  };
+
+  const handleCancelTimedTrial = () => {
+    setIsTrialRunning(false);
+    setTrialRemainingSec(20);
+    kinematicsEngineRef.current.cancelTimedTrial();
+  };
+
+  // 20-Second Clinical Trial Countdown & Auto-Report Validation Trigger
+  useEffect(() => {
+    if (!isTrialRunning) return;
+
+    const timerId = window.setInterval(() => {
+      const elapsedMs = Date.now() - trialStartTimestampRef.current;
+      const remaining = Math.max(0, 20 - elapsedMs / 1000);
+      setTrialRemainingSec(Math.round(remaining * 10) / 10);
+
+      // Halfway Epoch transition chime at 10.0s
+      if (elapsedMs >= 10000 && !midpointChimedRef.current) {
+        midpointChimedRef.current = true;
+        audioSonifier.playTargetLock();
+      }
+
+      if (remaining <= 0) {
+        window.clearInterval(timerId);
+        setIsTrialRunning(false);
+        setTrialRemainingSec(0);
+        audioSonifier.playCycleSuccess();
+        const validated = kinematicsEngineRef.current.getSessionReportTelemetry(true);
+        setReportSnapshot(validated);
+        setIsReportOpen(true);
+      }
+    }, 100);
+
+    return () => window.clearInterval(timerId);
+  }, [isTrialRunning]);
 
   const startCamera = async () => {
     try {
@@ -643,11 +695,42 @@ export const App: React.FC = () => {
               ) : telemetry?.isPinching ? 'FINGER PINCH CONTACT DETECTED' : 'BIOMECHANICAL MOTOR TELEMETRY ACTIVE')}
             </div>
 
-            {/* Stop Vision Floating Button (Top Center) */}
-            <div style={{ position: 'absolute', top: '0.75rem', left: '50%', transform: 'translateX(-50%)', zIndex: 30 }}>
+            {/* Top-Center 20s Timed Clinical Trial Pill + Stop Vision Button */}
+            <div style={{ position: 'absolute', top: '0.75rem', left: '50%', transform: 'translateX(-50%)', zIndex: 30, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              {isTrialRunning ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.35rem 0.9rem', background: 'rgba(15, 23, 42, 0.92)', backdropFilter: 'blur(8px)', border: '1.5px solid #38bdf8', borderRadius: '24px', boxShadow: '0 4px 20px rgba(2, 132, 199, 0.45)' }}>
+                  <Timer size={14} color="#38bdf8" />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.7rem', fontWeight: 800, color: '#ffffff', fontFamily: 'JetBrains Mono, monospace', whiteSpace: 'nowrap' }}>
+                      <span style={{ color: trialRemainingSec > 10 ? '#38bdf8' : '#fbbf24' }}>
+                        {trialRemainingSec > 10 ? 'EPOCH 1 (0–10s)' : 'EPOCH 2 (10–20s)'}
+                      </span>
+                      <span>•</span>
+                      <span>{trialRemainingSec.toFixed(1)}s LEFT</span>
+                    </div>
+                    <div style={{ width: '160px', height: '4px', background: 'rgba(255,255,255,0.12)', borderRadius: '2px', overflow: 'hidden' }}>
+                      <div style={{ width: `${Math.min(100, ((20 - trialRemainingSec) / 20) * 100)}%`, height: '100%', background: trialRemainingSec > 10 ? '#38bdf8' : '#f59e0b', transition: 'width 0.1s linear' }} />
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleCancelTimedTrial}
+                    style={{ padding: '0.2rem 0.55rem', background: 'rgba(255,255,255,0.12)', color: '#cbd5e1', border: 'none', borderRadius: '12px', fontSize: '0.65rem', fontWeight: 700, cursor: 'pointer' }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={handleStartTimedTrial}
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '0.38rem 0.95rem', background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)', color: '#ffffff', border: '1px solid rgba(186, 230, 253, 0.4)', borderRadius: '20px', fontSize: '0.72rem', fontWeight: 800, cursor: 'pointer', boxShadow: '0 4px 16px rgba(2, 132, 199, 0.4)' }}
+                >
+                  <Timer size={13} /> Start 20s Timed Exam
+                </button>
+              )}
+
               <button
                 onClick={stopCamera}
-                style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '0.35rem 0.85rem', background: 'rgba(220, 38, 38, 0.85)', backdropFilter: 'blur(4px)', color: '#ffffff', border: '1px solid rgba(255, 255, 255, 0.2)', borderRadius: '20px', fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.15s ease' }}
+                style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '0.38rem 0.85rem', background: 'rgba(220, 38, 38, 0.85)', backdropFilter: 'blur(4px)', color: '#ffffff', border: '1px solid rgba(255, 255, 255, 0.2)', borderRadius: '20px', fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.15s ease' }}
               >
                 <VideoOff size={13} /> Stop Vision Stream
               </button>
