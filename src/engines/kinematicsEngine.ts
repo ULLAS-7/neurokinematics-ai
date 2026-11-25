@@ -181,6 +181,7 @@ export class KinematicsEngine {
   private sessionWorstFntCurvature = 1.02;
   private sessionWorstFntTerminalOsc = 0;
   private lastValidTelemetry: KinematicsTelemetry | null = null;
+  private inActiveFreezePause = false;
 
   // 10-Second Timed Clinical Trial Epoch Tracking (0–5s vs 5–10s progression)
   private timedTrialStartMs: number | null = null;
@@ -244,13 +245,15 @@ export class KinematicsEngine {
     this.timedTrialStartMs = null;
     this.isTimedTrialCompleted = false;
     this.epochSamples = [];
+    this.inActiveFreezePause = false;
   }
 
   public processLandmarks(
     landmarks: HandLandmark[] | null,
     handedness: 'Right' | 'Left' | 'Unknown' = 'Right',
     confidence = 0,
-    noseLandmark: HandLandmark | null = null
+    noseLandmark: HandLandmark | null = null,
+    activeProtocol: 'task-3-4' | 'task-3-12' | 'task-3-15' = 'task-3-4'
   ): KinematicsTelemetry {
     const now = Date.now();
 
@@ -423,46 +426,50 @@ export class KinematicsEngine {
     this.wasNoseTouching = isNoseTouching;
     this.wasTargetTouching = isTargetLocked;
 
-    // 5. Pinch Event Detection
+    // 5. Pinch Event Detection (Only track Task 3.4 taps & mid-task freezes during Finger Tapping)
     const isPinching = apertureMm < 18;
 
-    if (!this.wasPinching && isPinching) {
-      const iti = this.lastTapTime > 0 ? now - this.lastTapTime : 300;
-      this.lastTapTime = now;
-      this.lastMovementTime = now;
-
-      const tapAperture = this.lastPeakAperture > 0 ? this.lastPeakAperture : apertureMm;
-      if (this.initialApertures.length < 3) {
-        this.initialApertures.push(tapAperture);
-      }
-      this.recentApertures.push(tapAperture);
-      if (this.recentApertures.length > 6) {
-        this.recentApertures.shift();
-      }
-
-      this.taps.push({
-        timestamp: now,
-        aperture: tapAperture,
-        velocity: velocityMmS,
-        interTapIntervalMs: iti,
-        isFatigued: false
-      });
-      this.lastPeakAperture = 0;
-    } else if (!isPinching) {
-      if (apertureMm > this.lastPeakAperture) {
-        this.lastPeakAperture = apertureMm;
-      }
-      if (velocityMmS > 30) {
+    if (activeProtocol === 'task-3-4') {
+      if (!this.wasPinching && isPinching) {
+        const iti = this.lastTapTime > 0 ? now - this.lastTapTime : 300;
+        this.lastTapTime = now;
         this.lastMovementTime = now;
+        this.inActiveFreezePause = false;
+
+        const tapAperture = this.lastPeakAperture > 0 ? this.lastPeakAperture : apertureMm;
+        if (this.initialApertures.length < 3) {
+          this.initialApertures.push(tapAperture);
+        }
+        this.recentApertures.push(tapAperture);
+        if (this.recentApertures.length > 6) {
+          this.recentApertures.shift();
+        }
+
+        this.taps.push({
+          timestamp: now,
+          aperture: tapAperture,
+          velocity: velocityMmS,
+          interTapIntervalMs: iti,
+          isFatigued: false
+        });
+        this.lastPeakAperture = 0;
+      } else if (!isPinching) {
+        if (apertureMm > this.lastPeakAperture) {
+          this.lastPeakAperture = apertureMm;
+        }
+        if (velocityMmS > 30) {
+          this.lastMovementTime = now;
+        }
+      }
+
+      // Count at most ONE freeze event per continuous >1500ms hesitation pause (no infinite increment when idle!)
+      if (now - this.lastMovementTime > 1500 && this.taps.length >= 3 && !this.inActiveFreezePause) {
+        this.freezingCount++;
+        this.inActiveFreezePause = true;
       }
     }
 
     this.wasPinching = isPinching;
-
-    if (now - this.lastMovementTime > 1400 && this.taps.length >= 3) {
-      this.freezingCount++;
-      this.lastMovementTime = now;
-    }
 
     // 6. Calculate Welch's Fast Fourier Transform (FFT) Power Spectrum for Tremor
     const { peakFreq, peakPower, classification, bins } = this.computeTremorFFT();
@@ -522,7 +529,12 @@ export class KinematicsEngine {
       this.freezingCount,
       peakFreq,
       peakPower,
-      classification
+      classification,
+      this.fntCurvatureIndex,
+      terminalOscillationMm,
+      pastPointingErrorMm,
+      activeProtocol,
+      totalTaps
     );
 
     // Record timestamped telemetry inside active 20s clinical trial window
@@ -614,15 +626,15 @@ export class KinematicsEngine {
     const meanApertureMm = tapsInEpoch.length > 0
       ? Math.round((tapsInEpoch.reduce((sum, t) => sum + t.aperture, 0) / tapsInEpoch.length) * 10) / 10
       : samplesInEpoch.length > 0
-      ? Math.round((samplesInEpoch.reduce((sum, s) => sum + s.apertureMm, 0) / samplesInEpoch.length) * 10) / 10
-      : 0;
+        ? Math.round((samplesInEpoch.reduce((sum, s) => sum + s.apertureMm, 0) / samplesInEpoch.length) * 10) / 10
+        : 0;
 
     const nonZeroVelocities = samplesInEpoch.map(s => s.velocityMmS).filter(v => v > 15);
     const meanVelocityMmS = nonZeroVelocities.length > 0
       ? Math.round(nonZeroVelocities.reduce((a, b) => a + b, 0) / nonZeroVelocities.length)
       : tapsInEpoch.length > 0
-      ? Math.round(tapsInEpoch.reduce((a, b) => a + b.velocity, 0) / tapsInEpoch.length)
-      : 0;
+        ? Math.round(tapsInEpoch.reduce((a, b) => a + b.velocity, 0) / tapsInEpoch.length)
+        : 0;
 
     let peakTremorPowerMm2 = 0;
     let peakTremorFreqHz = 0;
@@ -655,7 +667,10 @@ export class KinematicsEngine {
    * Returns a frozen diagnostic snapshot combining all cumulative & peak-recorded
    * findings across the active exam session (plus 20s Epoch 1 vs Epoch 2 validation).
    */
-  public getSessionReportTelemetry(finalizeTimedTrial = false): KinematicsTelemetry {
+  public getSessionReportTelemetry(
+    finalizeTimedTrial = false,
+    activeProtocol: 'task-3-4' | 'task-3-12' | 'task-3-15' = 'task-3-4'
+  ): KinematicsTelemetry {
     const base = this.lastValidTelemetry || this.generateEmptyTelemetry(Date.now());
 
     if (finalizeTimedTrial && this.timedTrialStartMs !== null) {
@@ -753,7 +768,12 @@ export class KinematicsEngine {
       base.freezingArrestsCount,
       reportTremorFreq,
       reportTremorPower,
-      reportTremorClass
+      reportTremorClass,
+      reportFntCurvature,
+      reportTerminalOsc,
+      base.targetReaching.pastPointingErrorMm,
+      activeProtocol,
+      base.totalTaps
     );
 
     return {
@@ -980,52 +1000,116 @@ export class KinematicsEngine {
     freezes: number,
     tremorFreq: number,
     tremorPower: number,
-    tremorClass: KinematicsTelemetry['tremorClassification']
+    tremorClass: KinematicsTelemetry['tremorClassification'],
+    fntCurvature: number = 1.0,
+    terminalOsc: number = 0,
+    pastPointing: number = 0,
+    activeProtocol: 'task-3-4' | 'task-3-12' | 'task-3-15' = 'task-3-4',
+    totalTaps: number = 0
   ): { grade: 0 | 1 | 2 | 3 | 4; interpretation: string; alert: string | null } {
+    const hasTaps = totalTaps >= 2;
+    const isTremorActive =
+      (tremorClass === 'Parkinsonian Resting Tremor' || tremorClass === 'Essential Action Tremor') &&
+      tremorPower > 2.5;
 
-    if (tremorClass === 'Parkinsonian Resting Tremor' && tremorPower > 8) {
-      return {
-        grade: 3,
-        interpretation: `High-amplitude 4-6 Hz resting tremor (${tremorFreq} Hz, ${tremorPower} mm²). Subthalamic nucleus synchrony detected.`,
-        alert: `⚠️ PARKINSONIAN RESTING TREMOR: ${tremorFreq} Hz PEAK`
-      };
-    }
-
-    if (freezes >= 2 || (cadence > 0 && cadence < 1.2)) {
+    // GRADE 4: Severe Akinesia / Multiple Freezing Arrests or Extreme Tapping Collapse
+    if (
+      (hasTaps && freezes >= 2) ||
+      (hasTaps && cadence > 0 && cadence < 1.2) ||
+      (hasTaps && decay >= 70 && cv >= 50)
+    ) {
       return {
         grade: 4,
-        interpretation: 'Severe bradykinesia with motor block / freezing-of-movement arrests. Patient unable to sustain reciprocal tapping.',
+        interpretation: 'Severe bradykinesia with repeated motor freezing arrests (>1.5s pauses) or extreme tapping collapse (<1.2 Hz).',
         alert: '🚨 SEVERE MOTOR ARREST / FREEZE DETECTED (UPDRS GRADE 4)'
       };
     }
 
-    if (decay >= 50 || (cadence > 0 && cadence < 2.2) || freezes === 1) {
+    // GRADE 3: Marked Hypokinesia (>=50% decay, <1.8 Hz, 1 freeze), High-Amplitude Tremor (>10 mm²), or Severe Ataxia (SARA 3)
+    if (
+      (isTremorActive && tremorPower > 10.0) ||
+      (activeProtocol === 'task-3-12' && (fntCurvature > 1.45 || terminalOsc > 8.0 || pastPointing > 30)) ||
+      (hasTaps && (decay >= 50 || (cadence > 0 && cadence < 1.8) || freezes === 1))
+    ) {
+      if (isTremorActive && tremorPower > 10.0) {
+        return {
+          grade: 3,
+          interpretation: `High-amplitude ${tremorClass.toLowerCase()} (${tremorFreq} Hz, ${tremorPower} mm²). Severe oscillatory instability.`,
+          alert: `⚠️ HIGH-AMPLITUDE TREMOR: ${tremorFreq} Hz PEAK (GRADE 3)`
+        };
+      }
+      if (activeProtocol === 'task-3-12' && (fntCurvature > 1.45 || terminalOsc > 8.0 || pastPointing > 30)) {
+        return {
+          grade: 3,
+          interpretation: `Severe cerebellar intention dysmetria (Curvature κ=${fntCurvature.toFixed(2)}, Terminal osc ${terminalOsc} mm). Marked motor decomposition.`,
+          alert: `⚠️ SEVERE CEREBELLAR ATAXIA: κ=${fntCurvature.toFixed(2)} (SARA/UPDRS GRADE 3)`
+        };
+      }
       return {
         grade: 3,
-        interpretation: `Moderate bradykinesia & progressive fatigue. Amplitude decay ${decay}%, pronounced rhythm dysregulation (CV ${cv}%).`,
+        interpretation: `Marked bradykinesia & progressive sequence fatigue. Amplitude decay ${decay}%, cadence ${cadence} Hz, rhythm CV ${cv}%.`,
         alert: `⚠️ SEVERE HYPOKINESIA: AMPLITUDE DECAY ${decay}% (UPDRS GRADE 3)`
       };
     }
 
-    if (decay >= 28 || (cadence > 0 && cadence < 3.0) || cv >= 35) {
+    // GRADE 2: Moderate Hypokinesia (28-49% decay or <2.5 Hz), Moderate Tremor (5.6-10 mm²), or Moderate Ataxia (SARA 2)
+    if (
+      (isTremorActive && tremorPower > 5.5) ||
+      (activeProtocol === 'task-3-12' && (fntCurvature > 1.25 || terminalOsc > 5.0 || pastPointing > 18)) ||
+      (hasTaps && (decay >= 28 || (cadence > 0 && cadence < 2.5) || cv >= 35))
+    ) {
+      if (isTremorActive && tremorPower > 5.5) {
+        return {
+          grade: 2,
+          interpretation: `Moderate ${tremorClass.toLowerCase()} detected at ${tremorFreq} Hz (${tremorPower} mm² spectral peak).`,
+          alert: null
+        };
+      }
+      if (activeProtocol === 'task-3-12' && (fntCurvature > 1.25 || terminalOsc > 5.0 || pastPointing > 18)) {
+        return {
+          grade: 2,
+          interpretation: `Moderate kinetic dysmetria & trajectory curvature (κ=${fntCurvature.toFixed(2)}, Terminal osc ${terminalOsc} mm).`,
+          alert: null
+        };
+      }
       return {
         grade: 2,
-        interpretation: `Mild motor slowing and early amplitude decrement (${decay}%). Preserved initiation with decremental cadence.`,
+        interpretation: `Moderate motor slowing and amplitude decrement (${decay}% decay, ${cadence} Hz cadence).`,
         alert: null
       };
     }
 
-    if (decay >= 15 || (cadence > 0 && cadence < 3.4) || cv >= 24) {
+    // GRADE 1: Slight/Mild Slowing (15-27% decay or 2.5-2.9 Hz), Mild Tremor (2.6-5.5 mm²), or Mild Ataxia (SARA 1)
+    if (
+      isTremorActive ||
+      (activeProtocol === 'task-3-12' && (fntCurvature > 1.15 || terminalOsc > 3.0 || pastPointing > 10)) ||
+      (hasTaps && (decay >= 15 || (cadence > 0 && cadence < 3.0) || cv >= 25))
+    ) {
+      if (isTremorActive) {
+        return {
+          grade: 1,
+          interpretation: `Mild low-amplitude ${tremorClass.toLowerCase()} (${tremorFreq} Hz, ${tremorPower} mm²). Subtle postural oscillation.`,
+          alert: null
+        };
+      }
+      if (activeProtocol === 'task-3-12' && (fntCurvature > 1.15 || terminalOsc > 3.0 || pastPointing > 10)) {
+        return {
+          grade: 1,
+          interpretation: `Mild path tortuosity (κ=${fntCurvature.toFixed(2)}) or subtle terminal wobble near target.`,
+          alert: null
+        };
+      }
       return {
         grade: 1,
-        interpretation: 'Slight slowing and subtle irregularity. Within acceptable upper limits of physiological variance.',
+        interpretation: `Slight motor slowing or early fatigue (${decay}% decay, ${cadence} Hz cadence). Mild impairment.`,
         alert: null
       };
     }
 
+    // GRADE 0: Healthy Physiological Baseline across all tasks
     return {
       grade: 0,
-      interpretation: 'Normal motor rhythm. Rapid, regular tapping cadence without progressive decrement or hesitations.',
+      interpretation: 'Normal motor rhythm. Crisp reciprocal execution without progressive decrement, tremor spikes, or dysmetria.',
       alert: null
     };
   }

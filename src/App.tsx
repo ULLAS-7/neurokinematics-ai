@@ -105,7 +105,7 @@ export const App: React.FC = () => {
   };
 
   const handleOpenReport = () => {
-    setReportSnapshot(kinematicsEngineRef.current.getSessionReportTelemetry());
+    setReportSnapshot(kinematicsEngineRef.current.getSessionReportTelemetry(false, activeProtocol));
     setIsReportOpen(true);
   };
 
@@ -146,7 +146,7 @@ export const App: React.FC = () => {
         setIsTrialRunning(false);
         setTrialRemainingSec(0);
         audioSonifier.playCycleSuccess();
-        const validated = kinematicsEngineRef.current.getSessionReportTelemetry(true);
+        const validated = kinematicsEngineRef.current.getSessionReportTelemetry(true, activeProtocol);
         setReportSnapshot(validated);
         setIsReportOpen(true);
       }
@@ -245,7 +245,8 @@ export const App: React.FC = () => {
           trackResult.landmarks,
           trackResult.handedness,
           trackResult.confidence,
-          trackResult.noseLandmark
+          trackResult.noseLandmark,
+          activeProtocol
         );
 
         // 3. Update Raw Real-Time Coordinates for Live Inspector
@@ -745,7 +746,7 @@ export const App: React.FC = () => {
         <KinematicsReportModal
           isOpen={isReportOpen}
           onClose={() => setIsReportOpen(false)}
-          telemetry={reportSnapshot || kinematicsEngineRef.current.getSessionReportTelemetry()}
+          telemetry={reportSnapshot || kinematicsEngineRef.current.getSessionReportTelemetry(false, activeProtocol)}
           subjectName="Live Clinical Evaluator"
           subjectType="Evaluator (Judge Baseline)"
           protocolName={activeProtocol === 'task-3-4' ? 'MDS-UPDRS Task 3.4 (Finger Tapping)' : activeProtocol === 'task-3-12' ? 'MDS-UPDRS Task 3.12 (Finger-to-Nose & Dysmetria)' : 'MDS-UPDRS Task 3.15 (Postural Tremor FFT)'}
