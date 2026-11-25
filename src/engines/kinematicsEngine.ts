@@ -84,11 +84,11 @@ export interface EpochMetrics {
 export interface TimedTrialSummary {
   durationSec: number;
   isTimedTrial: boolean;
-  initialEpoch: EpochMetrics;   // First half (0–10s)
-  terminalEpoch: EpochMetrics;  // Second half (10–20s)
-  cadenceChangePercent: number; // Negative = gradual slowing across 20s
-  apertureChangePercent: number; // Negative = gradual amplitude shrink across 20s
-  velocityChangePercent: number; // Negative = gradual velocity drop across 20s
+  initialEpoch: EpochMetrics;   // First half (0–5s)
+  terminalEpoch: EpochMetrics;  // Second half (5–10s)
+  cadenceChangePercent: number; // Negative = gradual slowing across 10s
+  apertureChangePercent: number; // Negative = gradual amplitude shrink across 10s
+  velocityChangePercent: number; // Negative = gradual velocity drop across 10s
   progressionVerdict: string;
   clinicalValidationNote: string;
 }
@@ -111,7 +111,7 @@ export interface KinematicsTelemetry {
   // MDS-UPDRS Task 3.12: Kinetic Target Reaching & Finger-to-Nose Protocol (FNT)
   targetReaching: TargetReachingState;
   fingerToNose: FingerToNoseState;
-  
+
   // Real-time Tremor FFT
   tremorFrequencyHz: number; // Dominant peak frequency in 0-16 Hz
   tremorPowerMm2: number; // Tremor amplitude squared
@@ -128,7 +128,7 @@ export interface KinematicsTelemetry {
 
   // 4-Condition Neurological Differential Diagnosis Matrix
   differential: MovementDisorderDifferential;
-  
+
   // Clinical UPDRS Severity Grading
   updrsGrade: 0 | 1 | 2 | 3 | 4;
   updrsInterpretation: string;
@@ -146,7 +146,7 @@ export class KinematicsEngine {
   private wristHistory: { t: number; x: number; y: number }[] = [];
   private indexTrajectory: { x: number; y: number; t: number }[] = [];
   private taps: TapEvent[] = [];
-  
+
   private wasPinching = false;
   private lastTapTime = 0;
   private lastPeakAperture = 0;
@@ -182,9 +182,9 @@ export class KinematicsEngine {
   private sessionWorstFntTerminalOsc = 0;
   private lastValidTelemetry: KinematicsTelemetry | null = null;
 
-  // 20-Second Timed Clinical Trial Epoch Tracking (0–10s vs 10–20s progression)
+  // 10-Second Timed Clinical Trial Epoch Tracking (0–5s vs 5–10s progression)
   private timedTrialStartMs: number | null = null;
-  private timedTrialDurationMs = 20000;
+  private timedTrialDurationMs = 10000;
   private isTimedTrialCompleted = false;
   private epochSamples: {
     elapsedMs: number;
@@ -196,9 +196,9 @@ export class KinematicsEngine {
     fntCycles: number;
   }[] = [];
 
-  private readonly MM_SCALE = 160; 
+  private readonly MM_SCALE = 160;
 
-  public startTimedTrial(durationMs = 20000) {
+  public startTimedTrial(durationMs = 10000) {
     this.resetSession();
     this.timedTrialStartMs = Date.now();
     this.timedTrialDurationMs = durationMs;
@@ -699,22 +699,25 @@ export class KinematicsEngine {
         effectiveDecayPercent = Math.max(effectiveDecayPercent, Math.abs(velocityChangePercent));
       }
 
-      let progressionVerdict = 'Insufficient Motor Data Captured in 20s Window';
-      let clinicalValidationNote = 'No continuous hand tracking captured during the 20s timed trial. Keep hand visible inside camera view.';
+      const totalSec = Math.round(this.timedTrialDurationMs / 1000);
+      const halfSec = Math.round(totalSec / 2);
+
+      let progressionVerdict = `Insufficient Motor Data Captured in ${totalSec}s Window`;
+      let clinicalValidationNote = `No continuous hand tracking captured during the ${totalSec}s timed trial. Keep hand visible inside camera view.`;
 
       if (this.epochSamples.length >= 20 || this.taps.length >= 2) {
         if (apertureChangePercent <= -25 || cadenceChangePercent <= -25 || velocityChangePercent <= -30) {
-          progressionVerdict = 'Progressive Motor Slowing & Sequence Effect Confirmed (0–10s → 10–20s)';
-          clinicalValidationNote = `Validated across the 20s exam: cadence changed ${cadenceChangePercent}%, aperture amplitude ${apertureChangePercent}%, and velocity ${velocityChangePercent}% from Epoch 1 to Epoch 2—consistent with progressive basal ganglia fatigue.`;
+          progressionVerdict = `Progressive Motor Slowing & Sequence Effect Confirmed (0–${halfSec}s → ${halfSec}–${totalSec}s)`;
+          clinicalValidationNote = `Validated across the ${totalSec}s exam: cadence changed ${cadenceChangePercent}%, aperture amplitude ${apertureChangePercent}%, and velocity ${velocityChangePercent}% from Epoch 1 to Epoch 2—consistent with progressive basal ganglia fatigue.`;
         } else if (reportTremorPower > 2.5) {
           progressionVerdict = `Sustained ${reportTremorClass} Validated (${reportTremorFreq} Hz Peak)`;
-          clinicalValidationNote = `Within the 20s window, Welch's FFT detected consistent oscillatory power (Epoch 1: ${initialEpoch.peakTremorPowerMm2} mm² → Epoch 2: ${terminalEpoch.peakTremorPowerMm2} mm²) peaking at ${reportTremorFreq} Hz.`;
+          clinicalValidationNote = `Within the ${totalSec}s window, Welch's FFT detected consistent oscillatory power (Epoch 1: ${initialEpoch.peakTremorPowerMm2} mm² → Epoch 2: ${terminalEpoch.peakTremorPowerMm2} mm²) peaking at ${reportTremorFreq} Hz.`;
         } else if (reportFntCurvature > 1.25 || reportTerminalOsc > 5.0) {
-          progressionVerdict = 'Kinetic Dysmetria & Ataxic Drift Validated in 20s Trial';
-          clinicalValidationNote = `Dual-Anchor Finger-to-Nose tracking over 20s measured path curvature κ = ${reportFntCurvature.toFixed(2)} and terminal oscillation ${reportTerminalOsc} mm.`;
+          progressionVerdict = `Kinetic Dysmetria & Ataxic Drift Validated in ${totalSec}s Trial`;
+          clinicalValidationNote = `Dual-Anchor Finger-to-Nose tracking over ${totalSec}s measured path curvature κ = ${reportFntCurvature.toFixed(2)} and terminal oscillation ${reportTerminalOsc} mm.`;
         } else {
-          progressionVerdict = 'Stable Motor Endurance Across Full 20s Timed Trial';
-          clinicalValidationNote = `Subject sustained consistent cadence (${initialEpoch.cadenceHz} Hz → ${terminalEpoch.cadenceHz} Hz) and aperture (${initialEpoch.meanApertureMm} mm → ${terminalEpoch.meanApertureMm} mm) across both 10s epochs without pathological fatigue.`;
+          progressionVerdict = `Stable Motor Endurance Across Full ${totalSec}s Timed Trial`;
+          clinicalValidationNote = `Subject sustained consistent cadence (${initialEpoch.cadenceHz} Hz → ${terminalEpoch.cadenceHz} Hz) and aperture (${initialEpoch.meanApertureMm} mm → ${terminalEpoch.meanApertureMm} mm) across both ${halfSec}s epochs without pathological fatigue.`;
         }
       }
 
@@ -979,7 +982,7 @@ export class KinematicsEngine {
     tremorPower: number,
     tremorClass: KinematicsTelemetry['tremorClassification']
   ): { grade: 0 | 1 | 2 | 3 | 4; interpretation: string; alert: string | null } {
-    
+
     if (tremorClass === 'Parkinsonian Resting Tremor' && tremorPower > 8) {
       return {
         grade: 3,

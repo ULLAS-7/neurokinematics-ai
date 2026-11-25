@@ -65,12 +65,12 @@ export const KinematicsReportModal: React.FC<KinematicsReportModalProps> = ({
       `- Motor Blocks / Freezing Pauses: ${telemetry.freezingArrestsCount}`,
       ...(telemetry.timedTrial ? [
         '',
-        `20-SECOND TEMPORAL PROGRESSION VALIDATION (${telemetry.timedTrial.durationSec}s Timed Span):`,
+        `${telemetry.timedTrial.durationSec}-SECOND TEMPORAL PROGRESSION VALIDATION (${telemetry.timedTrial.durationSec}s Timed Span):`,
         `- Verdict: ${telemetry.timedTrial.progressionVerdict}`,
         `- Validation Note: ${telemetry.timedTrial.clinicalValidationNote}`,
-        `- Epoch 1 (0-10s): ${telemetry.timedTrial.initialEpoch.tapCount} taps, ${telemetry.timedTrial.initialEpoch.cadenceHz} Hz, ${telemetry.timedTrial.initialEpoch.meanApertureMm} mm, ${telemetry.timedTrial.initialEpoch.meanVelocityMmS} mm/s, Peak Tremor ${telemetry.timedTrial.initialEpoch.peakTremorFreqHz} Hz (${telemetry.timedTrial.initialEpoch.peakTremorPowerMm2} mm^2)`,
-        `- Epoch 2 (10-20s): ${telemetry.timedTrial.terminalEpoch.tapCount} taps, ${telemetry.timedTrial.terminalEpoch.cadenceHz} Hz, ${telemetry.timedTrial.terminalEpoch.meanApertureMm} mm, ${telemetry.timedTrial.terminalEpoch.meanVelocityMmS} mm/s, Peak Tremor ${telemetry.timedTrial.terminalEpoch.peakTremorFreqHz} Hz (${telemetry.timedTrial.terminalEpoch.peakTremorPowerMm2} mm^2)`,
-        `- 20s Gradual Shift: Cadence ${telemetry.timedTrial.cadenceChangePercent}%, Aperture ${telemetry.timedTrial.apertureChangePercent}%, Velocity ${telemetry.timedTrial.velocityChangePercent}%`
+        `- Epoch 1 (0-${Math.round(telemetry.timedTrial.durationSec / 2)}s): ${telemetry.timedTrial.initialEpoch.tapCount} taps, ${telemetry.timedTrial.initialEpoch.cadenceHz} Hz, ${telemetry.timedTrial.initialEpoch.meanApertureMm} mm, ${telemetry.timedTrial.initialEpoch.meanVelocityMmS} mm/s, Peak Tremor ${telemetry.timedTrial.initialEpoch.peakTremorFreqHz} Hz (${telemetry.timedTrial.initialEpoch.peakTremorPowerMm2} mm^2)`,
+        `- Epoch 2 (${Math.round(telemetry.timedTrial.durationSec / 2)}-${telemetry.timedTrial.durationSec}s): ${telemetry.timedTrial.terminalEpoch.tapCount} taps, ${telemetry.timedTrial.terminalEpoch.cadenceHz} Hz, ${telemetry.timedTrial.terminalEpoch.meanApertureMm} mm, ${telemetry.timedTrial.terminalEpoch.meanVelocityMmS} mm/s, Peak Tremor ${telemetry.timedTrial.terminalEpoch.peakTremorFreqHz} Hz (${telemetry.timedTrial.terminalEpoch.peakTremorPowerMm2} mm^2)`,
+        `- ${telemetry.timedTrial.durationSec}s Gradual Shift: Cadence ${telemetry.timedTrial.cadenceChangePercent}%, Aperture ${telemetry.timedTrial.apertureChangePercent}%, Velocity ${telemetry.timedTrial.velocityChangePercent}%`
       ] : [])
     ].join('\n');
 
@@ -86,7 +86,7 @@ export const KinematicsReportModal: React.FC<KinematicsReportModalProps> = ({
   return (
     <div className="print-report-backdrop" style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem' }}>
       <div className="print-report-card" style={{ background: '#ffffff', width: '100%', maxWidth: '840px', maxHeight: '90vh', overflowY: 'auto', borderRadius: '12px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column' }}>
-        
+
         {/* Modal Action Header (Non-printable) */}
         <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1.5rem', borderBottom: '1px solid #e2e8f0', background: '#f8fafc', flexWrap: 'wrap', gap: '0.75rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
@@ -134,7 +134,7 @@ export const KinematicsReportModal: React.FC<KinematicsReportModalProps> = ({
 
         {/* Printable Clinical Document Body */}
         <div style={{ padding: '2rem 2.5rem', color: '#0f172a', fontFamily: 'Inter, -apple-system, sans-serif' }}>
-          
+
           {/* Institutional Letterhead */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid #0f172a', paddingBottom: '1.25rem', marginBottom: '1.5rem' }}>
             <div>
@@ -239,9 +239,9 @@ export const KinematicsReportModal: React.FC<KinematicsReportModalProps> = ({
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.76rem', background: '#ffffff', borderRadius: '6px', overflow: 'hidden', border: '1px solid #e0f2fe' }}>
                 <thead>
                   <tr style={{ background: '#e0f2fe', color: '#0c4a6e' }}>
-                    <th style={{ textAlign: 'left', padding: '0.45rem 0.65rem' }}>20s Progression Metric</th>
-                    <th style={{ textAlign: 'left', padding: '0.45rem 0.65rem' }}>Initial Epoch (0–10s)</th>
-                    <th style={{ textAlign: 'left', padding: '0.45rem 0.65rem' }}>Terminal Epoch (10–20s)</th>
+                    <th style={{ textAlign: 'left', padding: '0.45rem 0.65rem' }}>{telemetry.timedTrial.durationSec}s Progression Metric</th>
+                    <th style={{ textAlign: 'left', padding: '0.45rem 0.65rem' }}>Initial Epoch (0–{Math.round(telemetry.timedTrial.durationSec / 2)}s)</th>
+                    <th style={{ textAlign: 'left', padding: '0.45rem 0.65rem' }}>Terminal Epoch ({Math.round(telemetry.timedTrial.durationSec / 2)}–{telemetry.timedTrial.durationSec}s)</th>
                     <th style={{ textAlign: 'left', padding: '0.45rem 0.65rem' }}>Gradual Shift</th>
                   </tr>
                 </thead>
@@ -361,8 +361,8 @@ export const KinematicsReportModal: React.FC<KinematicsReportModalProps> = ({
               {telemetry.updrsGrade === 0
                 ? 'Absence of bradykinesia or abnormal tremor oscillations indicates intact nigrostriatal dopaminergic neurotransmission and normal basal ganglia motor loop disinhibition. No evidence of subthalamic nucleus (STN) hyper-synchronization.'
                 : telemetry.tremorClassification === 'Parkinsonian Resting Tremor'
-                ? 'Prominent 4-6 Hz tremor peak and decremental finger pinch amplitude reflect progressive degeneration of substantia nigra pars compacta dopaminergic projections, leading to uncontrolled STN beta-band oscillatory bursts.'
-                : 'Observed motor degradation reflects kinetic dysfunction. Recommend formal clinical correlation with Unified Parkinson\'s Disease Rating Scale (MDS-UPDRS) Part III and neurological evaluation for potential dopaminergic responsiveness (Levodopa challenge).'}
+                  ? 'Prominent 4-6 Hz tremor peak and decremental finger pinch amplitude reflect progressive degeneration of substantia nigra pars compacta dopaminergic projections, leading to uncontrolled STN beta-band oscillatory bursts.'
+                  : 'Observed motor degradation reflects kinetic dysfunction. Recommend formal clinical correlation with Unified Parkinson\'s Disease Rating Scale (MDS-UPDRS) Part III and neurological evaluation for potential dopaminergic responsiveness (Levodopa challenge).'}
             </p>
           </div>
 

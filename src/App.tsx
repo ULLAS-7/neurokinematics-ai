@@ -21,12 +21,12 @@ export const App: React.FC = () => {
   // Active Examination Protocol
   const [activeProtocol, setActiveProtocol] = useState<'task-3-4' | 'task-3-12' | 'task-3-15'>('task-3-4');
 
-  // Modals & 20-Second Timed Clinical Trial State
+  // Modals & 10-Second Timed Clinical Trial State
   const [isReportOpen, setIsReportOpen] = useState<boolean>(false);
   const [reportSnapshot, setReportSnapshot] = useState<KinematicsTelemetry | null>(null);
   const [isDefenseModalOpen, setIsDefenseModalOpen] = useState<boolean>(false);
   const [isTrialRunning, setIsTrialRunning] = useState<boolean>(false);
-  const [trialRemainingSec, setTrialRemainingSec] = useState<number>(20);
+  const [trialRemainingSec, setTrialRemainingSec] = useState<number>(10);
   const trialStartTimestampRef = useRef<number>(0);
   const midpointChimedRef = useRef<boolean>(false);
 
@@ -98,7 +98,7 @@ export const App: React.FC = () => {
 
   const handleResetSession = () => {
     setIsTrialRunning(false);
-    setTrialRemainingSec(20);
+    setTrialRemainingSec(10);
     kinematicsEngineRef.current.resetSession();
     setTelemetry(null);
     setReportSnapshot(null);
@@ -112,31 +112,31 @@ export const App: React.FC = () => {
   const handleStartTimedTrial = () => {
     setReportSnapshot(null);
     setIsReportOpen(false);
-    kinematicsEngineRef.current.startTimedTrial(20000);
+    kinematicsEngineRef.current.startTimedTrial(10000);
     trialStartTimestampRef.current = Date.now();
     midpointChimedRef.current = false;
-    setTrialRemainingSec(20);
+    setTrialRemainingSec(10);
     setIsTrialRunning(true);
     audioSonifier.playMetronomeTick(true);
   };
 
   const handleCancelTimedTrial = () => {
     setIsTrialRunning(false);
-    setTrialRemainingSec(20);
+    setTrialRemainingSec(10);
     kinematicsEngineRef.current.cancelTimedTrial();
   };
 
-  // 20-Second Clinical Trial Countdown & Auto-Report Validation Trigger
+  // 10-Second Clinical Trial Countdown & Auto-Report Validation Trigger
   useEffect(() => {
     if (!isTrialRunning) return;
 
     const timerId = window.setInterval(() => {
       const elapsedMs = Date.now() - trialStartTimestampRef.current;
-      const remaining = Math.max(0, 20 - elapsedMs / 1000);
+      const remaining = Math.max(0, 10 - elapsedMs / 1000);
       setTrialRemainingSec(Math.round(remaining * 10) / 10);
 
-      // Halfway Epoch transition chime at 10.0s
-      if (elapsedMs >= 10000 && !midpointChimedRef.current) {
+      // Halfway Epoch transition chime at 5.0s
+      if (elapsedMs >= 5000 && !midpointChimedRef.current) {
         midpointChimedRef.current = true;
         audioSonifier.playTargetLock();
       }
@@ -413,7 +413,7 @@ export const App: React.FC = () => {
         fontFamily: 'Inter, sans-serif'
       }}
     >
-      
+
       {/* Top Clinical Navigation Bar */}
       <div className="no-print">
         <HeaderNav
@@ -433,7 +433,7 @@ export const App: React.FC = () => {
 
       {/* FULLSCREEN HERO CAMERA VIEWPORT */}
       <div className="no-print" style={{ flex: 1, minHeight: 0, position: 'relative', width: '100%', height: 'calc(100vh - 65px)', overflow: 'hidden', background: '#020617', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        
+
         {/* Mirrored Video Feed with Clean Object-Fit Contain */}
         <video
           ref={videoRef}
@@ -522,7 +522,7 @@ export const App: React.FC = () => {
 
             {/* 2. TOP-RIGHT HUD: 4-WAY NEUROLOGICAL DIFFERENTIAL DIAGNOSTIC MATRIX */}
             <div style={{ position: 'absolute', top: '0.75rem', right: '0.75rem', background: 'rgba(15, 23, 42, 0.88)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: '8px', padding: '0.75rem 1rem', width: '305px', pointerEvents: 'none', zIndex: 20, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
-              
+
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem', borderBottom: '1px solid rgba(255, 255, 255, 0.1)', paddingBottom: '0.3rem' }}>
                 <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                   4-Disorder Differential Matrix
@@ -534,7 +534,7 @@ export const App: React.FC = () => {
 
               {/* Differential Probabilities Progress Bars */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', marginTop: '0.4rem' }}>
-                
+
                 {/* Parkinson's Disease (IPD) */}
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.66rem', fontWeight: 700, color: '#f87171' }}>
@@ -690,26 +690,26 @@ export const App: React.FC = () => {
                 telemetry?.fingerToNose.currentPhase === 'REACH_NOSE'
                   ? `👉 STEP 1: TOUCH YOUR NOSE (d: ${telemetry.fingerToNose.distanceFingerToNoseMm} mm)`
                   : telemetry?.fingerToNose.currentPhase === 'REACH_TARGET'
-                  ? `👉 STEP 2: EXTEND ARM TO EXAMINER TARGET (d: ${telemetry.fingerToNose.distanceFingerToTargetMm} mm)`
-                  : `👉 STEP 3: RETURN FINGER BACK TO NOSE (d: ${telemetry.fingerToNose.distanceFingerToNoseMm} mm)`
+                    ? `👉 STEP 2: EXTEND ARM TO EXAMINER TARGET (d: ${telemetry.fingerToNose.distanceFingerToTargetMm} mm)`
+                    : `👉 STEP 3: RETURN FINGER BACK TO NOSE (d: ${telemetry.fingerToNose.distanceFingerToNoseMm} mm)`
               ) : telemetry?.isPinching ? 'FINGER PINCH CONTACT DETECTED' : 'BIOMECHANICAL MOTOR TELEMETRY ACTIVE')}
             </div>
 
-            {/* Top-Center 20s Timed Clinical Trial Pill + Stop Vision Button */}
+            {/* Top-Center 10s Timed Clinical Trial Pill + Stop Vision Button */}
             <div style={{ position: 'absolute', top: '0.75rem', left: '50%', transform: 'translateX(-50%)', zIndex: 30, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               {isTrialRunning ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.35rem 0.9rem', background: 'rgba(15, 23, 42, 0.92)', backdropFilter: 'blur(8px)', border: '1.5px solid #38bdf8', borderRadius: '24px', boxShadow: '0 4px 20px rgba(2, 132, 199, 0.45)' }}>
                   <Timer size={14} color="#38bdf8" />
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.7rem', fontWeight: 800, color: '#ffffff', fontFamily: 'JetBrains Mono, monospace', whiteSpace: 'nowrap' }}>
-                      <span style={{ color: trialRemainingSec > 10 ? '#38bdf8' : '#fbbf24' }}>
-                        {trialRemainingSec > 10 ? 'EPOCH 1 (0–10s)' : 'EPOCH 2 (10–20s)'}
+                      <span style={{ color: trialRemainingSec > 5 ? '#38bdf8' : '#fbbf24' }}>
+                        {trialRemainingSec > 5 ? 'EPOCH 1 (0–5s)' : 'EPOCH 2 (5–10s)'}
                       </span>
                       <span>•</span>
                       <span>{trialRemainingSec.toFixed(1)}s LEFT</span>
                     </div>
                     <div style={{ width: '160px', height: '4px', background: 'rgba(255,255,255,0.12)', borderRadius: '2px', overflow: 'hidden' }}>
-                      <div style={{ width: `${Math.min(100, ((20 - trialRemainingSec) / 20) * 100)}%`, height: '100%', background: trialRemainingSec > 10 ? '#38bdf8' : '#f59e0b', transition: 'width 0.1s linear' }} />
+                      <div style={{ width: `${Math.min(100, ((10 - trialRemainingSec) / 10) * 100)}%`, height: '100%', background: trialRemainingSec > 5 ? '#38bdf8' : '#f59e0b', transition: 'width 0.1s linear' }} />
                     </div>
                   </div>
                   <button
@@ -724,7 +724,7 @@ export const App: React.FC = () => {
                   onClick={handleStartTimedTrial}
                   style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '0.38rem 0.95rem', background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)', color: '#ffffff', border: '1px solid rgba(186, 230, 253, 0.4)', borderRadius: '20px', fontSize: '0.72rem', fontWeight: 800, cursor: 'pointer', boxShadow: '0 4px 16px rgba(2, 132, 199, 0.4)' }}
                 >
-                  <Timer size={13} /> Start 20s Timed Exam
+                  <Timer size={13} /> Start 10s Timed Exam
                 </button>
               )}
 
