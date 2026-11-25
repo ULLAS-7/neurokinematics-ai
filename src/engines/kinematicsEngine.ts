@@ -148,6 +148,15 @@ export class KinematicsEngine {
   private wasTargetTouching = false;
   private lastPhaseSwitchTime = Date.now();
 
+  // Persistent Session Clinical Memory (prevents Report resetting to 0 when hand stops/exits frame)
+  private sessionPeakTremorFreq = 0;
+  private sessionPeakTremorPower = 0;
+  private sessionPeakTremorClass: KinematicsTelemetry['tremorClassification'] = 'Healthy Baseline';
+  private sessionPeakBins: TremorSpectrumBin[] = [];
+  private sessionWorstFntCurvature = 1.02;
+  private sessionWorstFntTerminalOsc = 0;
+  private lastValidTelemetry: KinematicsTelemetry | null = null;
+
   private readonly MM_SCALE = 160; 
 
   public resetSession() {
@@ -172,6 +181,14 @@ export class KinematicsEngine {
     this.fntTerminalTremorPower = 0.5;
     this.wasNoseTouching = false;
     this.wasTargetTouching = false;
+
+    this.sessionPeakTremorFreq = 0;
+    this.sessionPeakTremorPower = 0;
+    this.sessionPeakTremorClass = 'Healthy Baseline';
+    this.sessionPeakBins = [];
+    this.sessionWorstFntCurvature = 1.02;
+    this.sessionWorstFntTerminalOsc = 0;
+    this.lastValidTelemetry = null;
   }
 
   public processLandmarks(
@@ -183,6 +200,16 @@ export class KinematicsEngine {
     const now = Date.now();
 
     if (!landmarks || landmarks.length < 21) {
+      if (this.lastValidTelemetry) {
+        return {
+          ...this.lastValidTelemetry,
+          timestamp: now,
+          handDetected: false,
+          pinchApertureMm: 0,
+          instantVelocityMmS: 0,
+          isPinching: false
+        };
+      }
       return this.generateEmptyTelemetry(now);
     }
 
@@ -443,7 +470,21 @@ export class KinematicsEngine {
       classification
     );
 
-    return {
+    // Persist strongest pathological / clinical findings for accurate Diagnostic Report
+    if (peakPower > 2.5 && peakFreq >= 1.5 && peakPower >= this.sessionPeakTremorPower) {
+      this.sessionPeakTremorFreq = peakFreq;
+      this.sessionPeakTremorPower = peakPower;
+      this.sessionPeakTremorClass = classification;
+      this.sessionPeakBins = bins.map(b => ({ ...b }));
+    }
+    if (this.fntCurvatureIndex > this.sessionWorstFntCurvature) {
+      this.sessionWorstFntCurvature = this.fntCurvatureIndex;
+    }
+    if (terminalOscillationMm > this.sessionWorstFntTerminalOsc) {
+      this.sessionWorstFntTerminalOsc = terminalOscillationMm;
+    }
+
+    const liveResult: KinematicsTelemetry = {
       timestamp: now,
       pinchApertureMm: apertureMm,
       instantVelocityMmS: velocityMmS,
@@ -478,6 +519,66 @@ export class KinematicsEngine {
       updrsInterpretation: interpretation,
       clinicalAlert: alert,
       apertureHistory: [...this.apertureHistory]
+    };
+
+    this.lastValidTelemetry = liveResult;
+    return liveResult;
+  }
+
+  /**
+   * Returns a frozen diagnostic snapshot combining all cumulative & peak-recorded
+   * findings across the active exam session so the Report stays accurate even after
+   * the user stops trembling or lowers their hand to click "Report".
+   */
+  public getSessionReportTelemetry(): KinematicsTelemetry {
+    const base = this.lastValidTelemetry || this.generateEmptyTelemetry(Date.now());
+
+    const usePeakTremor = this.sessionPeakTremorPower > 2.5 && this.sessionPeakTremorPower > base.tremorPowerMm2;
+    const reportTremorFreq = usePeakTremor ? this.sessionPeakTremorFreq : base.tremorFrequencyHz;
+    const reportTremorPower = usePeakTremor ? this.sessionPeakTremorPower : base.tremorPowerMm2;
+    const reportTremorClass = usePeakTremor ? this.sessionPeakTremorClass : base.tremorClassification;
+    const reportBins = usePeakTremor && this.sessionPeakBins.length > 0 ? this.sessionPeakBins : base.spectrumBins;
+
+    const reportFntCurvature = Math.max(base.fingerToNose.pathCurvatureIndex, this.sessionWorstFntCurvature);
+    const reportTerminalOsc = Math.max(base.targetReaching.terminalOscillationMm, this.sessionWorstFntTerminalOsc);
+
+    const differential = this.computeMovementDisorderDifferential(
+      base.meanCadenceHz,
+      base.amplitudeDecayPercent,
+      base.rhythmRegularityCv,
+      reportTremorFreq,
+      reportTremorPower,
+      reportTerminalOsc,
+      base.targetReaching.pastPointingErrorMm,
+      reportFntCurvature,
+      base.fingerToNose.completedCycles
+    );
+
+    const { grade, interpretation, alert } = this.evaluateUprdGrade(
+      base.meanCadenceHz,
+      base.amplitudeDecayPercent,
+      base.rhythmRegularityCv,
+      base.freezingArrestsCount,
+      reportTremorFreq,
+      reportTremorPower,
+      reportTremorClass
+    );
+
+    return {
+      ...base,
+      tremorFrequencyHz: reportTremorFreq,
+      tremorPowerMm2: reportTremorPower,
+      tremorClassification: reportTremorClass,
+      spectrumBins: reportBins,
+      fingerToNose: {
+        ...base.fingerToNose,
+        pathCurvatureIndex: reportFntCurvature,
+        terminalIntentionPowerMm2: Math.max(base.fingerToNose.terminalIntentionPowerMm2, reportTerminalOsc)
+      },
+      differential,
+      updrsGrade: grade,
+      updrsInterpretation: interpretation,
+      clinicalAlert: alert
     };
   }
 

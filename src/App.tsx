@@ -23,6 +23,7 @@ export const App: React.FC = () => {
 
   // Modals
   const [isReportOpen, setIsReportOpen] = useState<boolean>(false);
+  const [reportSnapshot, setReportSnapshot] = useState<KinematicsTelemetry | null>(null);
   const [isDefenseModalOpen, setIsDefenseModalOpen] = useState<boolean>(false);
 
   // Raw Landmark Coordinates for Live Transparency Inspector
@@ -93,6 +94,13 @@ export const App: React.FC = () => {
 
   const handleResetSession = () => {
     kinematicsEngineRef.current.resetSession();
+    setTelemetry(null);
+    setReportSnapshot(null);
+  };
+
+  const handleOpenReport = () => {
+    setReportSnapshot(kinematicsEngineRef.current.getSessionReportTelemetry());
+    setIsReportOpen(true);
   };
 
   const startCamera = async () => {
@@ -340,6 +348,7 @@ export const App: React.FC = () => {
   return (
     <div
       ref={mainContainerRef}
+      className="app-root-shell"
       style={{
         height: '100vh',
         maxHeight: '100vh',
@@ -354,22 +363,24 @@ export const App: React.FC = () => {
     >
       
       {/* Top Clinical Navigation Bar */}
-      <HeaderNav
-        isAudioMuted={isAudioMuted}
-        onToggleAudio={handleToggleAudio}
-        isFullscreen={isFullscreen}
-        onToggleFullscreen={toggleFullscreen}
-        onResetSession={handleResetSession}
-        onOpenReport={() => setIsReportOpen(true)}
-        onOpenDefenseGuide={() => setIsDefenseModalOpen(true)}
-        isCameraActive={isCameraActive}
-        engineType={engineType}
-        activeProtocol={activeProtocol}
-        onSelectProtocol={setActiveProtocol}
-      />
+      <div className="no-print">
+        <HeaderNav
+          isAudioMuted={isAudioMuted}
+          onToggleAudio={handleToggleAudio}
+          isFullscreen={isFullscreen}
+          onToggleFullscreen={toggleFullscreen}
+          onResetSession={handleResetSession}
+          onOpenReport={handleOpenReport}
+          onOpenDefenseGuide={() => setIsDefenseModalOpen(true)}
+          isCameraActive={isCameraActive}
+          engineType={engineType}
+          activeProtocol={activeProtocol}
+          onSelectProtocol={setActiveProtocol}
+        />
+      </div>
 
       {/* FULLSCREEN HERO CAMERA VIEWPORT */}
-      <div style={{ flex: 1, minHeight: 0, position: 'relative', width: '100%', height: 'calc(100vh - 65px)', overflow: 'hidden', background: '#020617', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div className="no-print" style={{ flex: 1, minHeight: 0, position: 'relative', width: '100%', height: 'calc(100vh - 65px)', overflow: 'hidden', background: '#020617', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         
         {/* Mirrored Video Feed with Clean Object-Fit Contain */}
         <video
@@ -647,14 +658,14 @@ export const App: React.FC = () => {
       </div>
 
       {/* Clinical Diagnostic PDF Report Modal */}
-      {telemetry && (
+      {isReportOpen && (
         <KinematicsReportModal
           isOpen={isReportOpen}
           onClose={() => setIsReportOpen(false)}
-          telemetry={telemetry}
+          telemetry={reportSnapshot || kinematicsEngineRef.current.getSessionReportTelemetry()}
           subjectName="Live Clinical Evaluator"
           subjectType="Evaluator (Judge Baseline)"
-          protocolName={activeProtocol === 'task-3-4' ? 'MDS-UPDRS Task 3.4 (Finger Tapping)' : activeProtocol === 'task-3-12' ? 'MDS-UPDRS Task 3.12 (Kinetic Reaching Dysmetria)' : 'MDS-UPDRS Task 3.15 (Postural Tremor FFT)'}
+          protocolName={activeProtocol === 'task-3-4' ? 'MDS-UPDRS Task 3.4 (Finger Tapping)' : activeProtocol === 'task-3-12' ? 'MDS-UPDRS Task 3.12 (Finger-to-Nose & Dysmetria)' : 'MDS-UPDRS Task 3.15 (Postural Tremor FFT)'}
         />
       )}
 

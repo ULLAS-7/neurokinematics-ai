@@ -39,7 +39,31 @@ code, kbd, samp, pre {
   .no-print {
     display: none !important;
   }
-  body {
+  html, body, #root {
     background: #ffffff !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+  .app-root-shell {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+  }
+  .print-report-backdrop {
+    position: static !important;
+    inset: auto !important;
+    background: #ffffff !important;
+    backdrop-filter: none !important;
+    padding: 0 !important;
+    display: block !important;
+  }
+  .print-report-card {
+    max-width: 100% !important;
+    max-height: none !important;
+    overflow: visible !important;
+    box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
   }
 }

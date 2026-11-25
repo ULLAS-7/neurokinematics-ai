@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { KinematicsTelemetry } from '../engines/kinematicsEngine';
-import { Printer, X, Activity } from 'lucide-react';
+import { Printer, X, Activity, Download } from 'lucide-react';
 
 interface KinematicsReportModalProps {
   isOpen: boolean;
@@ -15,34 +15,104 @@ export const KinematicsReportModal: React.FC<KinematicsReportModalProps> = ({
   isOpen,
   onClose,
   telemetry,
-  subjectName,
-  subjectType,
+  subjectName: initialSubjectName,
+  subjectType: initialSubjectType,
   protocolName
 }) => {
+  const [subjectName, setSubjectName] = useState(initialSubjectName);
+  const [subjectType, setSubjectType] = useState<'Clinical Patient' | 'Evaluator (Judge Baseline)'>(initialSubjectType);
+
+  const { reportId, acquisitionTime } = useMemo(() => {
+    return {
+      reportId: `NK-${Date.now().toString().slice(-6)}`,
+      acquisitionTime: new Date().toLocaleString()
+    };
+  }, [isOpen, telemetry.timestamp]);
+
   if (!isOpen) return null;
 
   const handlePrint = () => {
     window.print();
   };
 
+  const handleDownloadSummary = () => {
+    const summaryText = [
+      'NEUROKINEMATICS AI - CLINICAL KINEMATIC DIAGNOSTIC REPORT',
+      `Report ID: ${reportId}`,
+      `Acquisition Time: ${acquisitionTime}`,
+      `Subject: ${subjectName} (${subjectType})`,
+      `Evaluated Hand: ${telemetry.handedness} Hand`,
+      `Protocol: ${protocolName}`,
+      '',
+      `PRIMARY PREDICTION: ${telemetry.differential.primaryPrediction}`,
+      `Clinical Rationale: ${telemetry.differential.clinicalRationale}`,
+      `MDS-UPDRS Motor Severity: Grade ${telemetry.updrsGrade} / 4`,
+      `Interpretation: ${telemetry.updrsInterpretation}`,
+      '',
+      '4-CONDITION DIFFERENTIAL MATRIX:',
+      `- Idiopathic Parkinson's Disease (IPD): ${telemetry.differential.parkinsonsProb}%`,
+      `- Essential Action Tremor (ET): ${telemetry.differential.essentialTremorProb}%`,
+      `- Cerebellar Intention Ataxia (CA): ${telemetry.differential.cerebellarAtaxiaProb}%`,
+      `- Healthy Physiological Baseline (NL): ${telemetry.differential.healthyBaselineProb}%`,
+      '',
+      'QUANTITATIVE BIOMARKERS:',
+      `- Total Taps Recorded: ${telemetry.totalTaps}`,
+      `- Tapping Cadence: ${telemetry.meanCadenceHz} Hz`,
+      `- Amplitude Decay (Sequence Effect): ${telemetry.amplitudeDecayPercent}%`,
+      `- Rhythm Irregularity (CV_ITI): ${telemetry.rhythmRegularityCv}%`,
+      `- Tremor FFT Peak: ${telemetry.tremorFrequencyHz > 0 ? `${telemetry.tremorFrequencyHz} Hz (${telemetry.tremorPowerMm2} mm^2)` : 'None (<1.5 Hz)'} [${telemetry.tremorClassification}]`,
+      `- Finger-to-Nose (FNT) Curvature (kappa): ${telemetry.fingerToNose.pathCurvatureIndex.toFixed(2)} (${telemetry.fingerToNose.completedCycles} cycles) [${telemetry.fingerToNose.clinicalSeverity}]`,
+      `- Motor Blocks / Freezing Pauses: ${telemetry.freezingArrestsCount}`
+    ].join('\n');
+
+    const blob = new Blob([summaryText], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${reportId}_NeuroKinematics_Report.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem' }}>
-      <div style={{ background: '#ffffff', width: '100%', maxWidth: '820px', maxHeight: '90vh', overflowY: 'auto', borderRadius: '12px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column' }}>
+    <div className="print-report-backdrop" style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem' }}>
+      <div className="print-report-card" style={{ background: '#ffffff', width: '100%', maxWidth: '840px', maxHeight: '90vh', overflowY: 'auto', borderRadius: '12px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column' }}>
         
         {/* Modal Action Header (Non-printable) */}
-        <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1.5rem', borderBottom: '1px solid #e2e8f0', background: '#f8fafc' }}>
+        <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1.5rem', borderBottom: '1px solid #e2e8f0', background: '#f8fafc', flexWrap: 'wrap', gap: '0.75rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
             <Activity size={20} color="#0284c7" />
             <span style={{ fontSize: '0.95rem', fontWeight: 800, color: '#0f172a' }}>
-              MDS-UPDRS Motor Biomarker Diagnostic Report
+              MDS-UPDRS &amp; SARA Motor Biomarker Diagnostic Report
             </span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+            <input
+              type="text"
+              value={subjectName}
+              onChange={(e) => setSubjectName(e.target.value)}
+              placeholder="Patient / Evaluator Name"
+              style={{ padding: '0.4rem 0.65rem', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '0.78rem', color: '#0f172a', width: '165px' }}
+            />
+            <select
+              value={subjectType}
+              onChange={(e) => setSubjectType(e.target.value as 'Clinical Patient' | 'Evaluator (Judge Baseline)')}
+              style={{ padding: '0.4rem 0.5rem', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '0.78rem', color: '#0f172a', background: '#ffffff' }}
+            >
+              <option value="Evaluator (Judge Baseline)">Evaluator (Judge)</option>
+              <option value="Clinical Patient">Clinical Patient</option>
+            </select>
+            <button
+              onClick={handleDownloadSummary}
+              style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '0.45rem 0.8rem', background: '#f1f5f9', color: '#0f172a', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer' }}
+            >
+              <Download size={14} /> Export TXT
+            </button>
             <button
               onClick={handlePrint}
               style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.45rem 0.9rem', background: '#0284c7', color: '#ffffff', border: 'none', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer' }}
             >
-              <Printer size={15} /> Print / Export PDF
+              <Printer size={15} /> Print / Save PDF
             </button>
             <button
               onClick={onClose}
@@ -63,18 +133,18 @@ export const KinematicsReportModal: React.FC<KinematicsReportModalProps> = ({
                 NEUROKINEMATICS AI™
               </h1>
               <p style={{ fontSize: '0.8rem', color: '#0369a1', fontWeight: 700, margin: '0.2rem 0 0 0', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                Computer-Vision Movement Disorder & Tremor Kinematics Laboratory
+                Computer-Vision Movement Disorder &amp; Tremor Kinematics Laboratory
               </p>
               <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0.2rem 0 0 0' }}>
-                MDS-UPDRS Part III Motor Examination Protocol • Client-Side Neural GPU Acceleration
+                MDS-UPDRS Part III &amp; SARA Motor Examination Protocol • Client-Side Neural GPU Acceleration
               </p>
             </div>
             <div style={{ textAlign: 'right' }}>
               <span style={{ display: 'inline-block', padding: '0.25rem 0.6rem', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 700, color: '#334155' }}>
-                REPORT ID: NK-{Date.now().toString().slice(-6)}
+                REPORT ID: {reportId}
               </span>
               <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0.35rem 0 0 0' }}>
-                Acquisition: {new Date().toLocaleString()}
+                Acquisition: {acquisitionTime}
               </p>
             </div>
           </div>
@@ -100,16 +170,16 @@ export const KinematicsReportModal: React.FC<KinematicsReportModalProps> = ({
           </div>
 
           {/* Core Diagnostic Outcome Callout */}
-          <div style={{ background: telemetry.updrsGrade === 0 ? '#f0fdf4' : telemetry.updrsGrade <= 2 ? '#fffbeb' : '#fef2f2', border: `1.5px solid ${telemetry.updrsGrade === 0 ? '#86efac' : telemetry.updrsGrade <= 2 ? '#fde68a' : '#fca5a5'}`, borderRadius: '8px', padding: '1.25rem', marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ background: telemetry.updrsGrade === 0 && telemetry.differential.primaryPrediction === 'Healthy Physiological Baseline' ? '#f0fdf4' : telemetry.updrsGrade <= 2 && telemetry.differential.primaryPrediction === 'Healthy Physiological Baseline' ? '#fffbeb' : '#fef2f2', border: `1.5px solid ${telemetry.updrsGrade === 0 && telemetry.differential.primaryPrediction === 'Healthy Physiological Baseline' ? '#86efac' : '#fca5a5'}`, borderRadius: '8px', padding: '1.25rem', marginBottom: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
-              <span style={{ fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em', color: telemetry.updrsGrade === 0 ? '#15803d' : telemetry.updrsGrade <= 2 ? '#b45309' : '#b91c1c' }}>
-                Primary Neurological Rating
+              <span style={{ fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em', color: telemetry.updrsGrade === 0 && telemetry.differential.primaryPrediction === 'Healthy Physiological Baseline' ? '#15803d' : '#b91c1c' }}>
+                Primary Differential Prediction: {telemetry.differential.primaryPrediction}
               </span>
               <h2 style={{ fontSize: '1.35rem', fontWeight: 900, margin: '0.2rem 0', color: '#0f172a' }}>
                 MDS-UPDRS Motor Severity: Grade {telemetry.updrsGrade} / 4
               </h2>
-              <p style={{ fontSize: '0.825rem', color: '#334155', margin: 0, maxWidth: '520px', lineHeight: 1.4 }}>
-                {telemetry.updrsInterpretation}
+              <p style={{ fontSize: '0.825rem', color: '#334155', margin: 0, maxWidth: '540px', lineHeight: 1.4 }}>
+                {telemetry.differential.clinicalRationale} {telemetry.updrsGrade > 0 ? telemetry.updrsInterpretation : ''}
               </p>
             </div>
             <div style={{ textAlign: 'right' }}>
@@ -122,9 +192,29 @@ export const KinematicsReportModal: React.FC<KinematicsReportModalProps> = ({
             </div>
           </div>
 
+          {/* 4-Condition Neurological Differential Matrix */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.75rem', marginBottom: '1.5rem' }}>
+            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', padding: '0.75rem' }}>
+              <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#991b1b', textTransform: 'uppercase' }}>Parkinson&apos;s (IPD)</span>
+              <p style={{ margin: '0.2rem 0 0 0', fontSize: '1.2rem', fontWeight: 900, color: '#dc2626', fontFamily: 'monospace' }}>{telemetry.differential.parkinsonsProb}%</p>
+            </div>
+            <div style={{ background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: '8px', padding: '0.75rem' }}>
+              <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#6b21a8', textTransform: 'uppercase' }}>Essential Tremor (ET)</span>
+              <p style={{ margin: '0.2rem 0 0 0', fontSize: '1.2rem', fontWeight: 900, color: '#9333ea', fontFamily: 'monospace' }}>{telemetry.differential.essentialTremorProb}%</p>
+            </div>
+            <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', padding: '0.75rem' }}>
+              <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#92400e', textTransform: 'uppercase' }}>Cerebellar Ataxia</span>
+              <p style={{ margin: '0.2rem 0 0 0', fontSize: '1.2rem', fontWeight: 900, color: '#d97706', fontFamily: 'monospace' }}>{telemetry.differential.cerebellarAtaxiaProb}%</p>
+            </div>
+            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '0.75rem' }}>
+              <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#166534', textTransform: 'uppercase' }}>Healthy Baseline</span>
+              <p style={{ margin: '0.2rem 0 0 0', fontSize: '1.2rem', fontWeight: 900, color: '#16a34a', fontFamily: 'monospace' }}>{telemetry.differential.healthyBaselineProb}%</p>
+            </div>
+          </div>
+
           {/* Quantitative Kinematics Biomarker Matrix */}
           <h3 style={{ fontSize: '0.85rem', fontWeight: 800, color: '#0f172a', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.75rem', borderBottom: '1px solid #e2e8f0', paddingBottom: '0.4rem' }}>
-            Quantitative Biomechanical Biomarkers
+            Quantitative Biomechanical Biomarkers ({telemetry.totalTaps} Total Taps Recorded)
           </h3>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem', marginBottom: '1.5rem' }}>
             <thead>
@@ -139,9 +229,9 @@ export const KinematicsReportModal: React.FC<KinematicsReportModalProps> = ({
               <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
                 <td style={{ padding: '0.6rem 0.75rem', fontWeight: 600 }}>Tapping Cadence (Frequency)</td>
                 <td style={{ padding: '0.6rem 0.75rem', fontWeight: 800, fontFamily: 'monospace' }}>{telemetry.meanCadenceHz} Hz</td>
-                <td style={{ padding: '0.6rem 0.75rem', color: '#64748b' }}>&ge; 3.5 Hz (Normal recriprocal)</td>
-                <td style={{ padding: '0.6rem 0.75rem', color: telemetry.meanCadenceHz >= 3.0 ? '#16a34a' : '#dc2626', fontWeight: 700 }}>
-                  {telemetry.meanCadenceHz >= 3.5 ? 'Normal' : telemetry.meanCadenceHz >= 2.5 ? 'Mild Slowing' : 'Bradykinesia'}
+                <td style={{ padding: '0.6rem 0.75rem', color: '#64748b' }}>&ge; 3.5 Hz (Normal reciprocal)</td>
+                <td style={{ padding: '0.6rem 0.75rem', color: telemetry.totalTaps < 2 ? '#64748b' : telemetry.meanCadenceHz >= 3.0 ? '#16a34a' : '#dc2626', fontWeight: 700 }}>
+                  {telemetry.totalTaps < 2 ? 'Not Tested (0 Taps)' : telemetry.meanCadenceHz >= 3.5 ? 'Normal' : telemetry.meanCadenceHz >= 2.5 ? 'Mild Slowing' : 'Bradykinesia'}
                 </td>
               </tr>
               <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
